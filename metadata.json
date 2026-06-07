@@ -1,0 +1,6 @@
+{
+  "name": "Programador de Consultas Médicas",
+  "description": "Sistema para automatizar la programación de consultas médicas con bloqueos específicos por médico y exportación multihoja de Excel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

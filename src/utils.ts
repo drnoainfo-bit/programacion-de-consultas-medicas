@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { Doctor, Appointment, BlockedDay, Shift24h } from './types';
 
 // Helper to get week dates based on a reference date
@@ -216,164 +216,371 @@ export const INITIAL_APPOINTMENTS: Appointment[] = [
 ];
 
 /**
- * EXPORT TO EXCEL LOGIC
- * Creates one Workbook where each doctor gets their own custom formatted Sheet
+ * EXPORT TO EXCEL — Visual weekly grid matching Google Sheet structure.
+ * One sheet per doctor, weeks arranged Mon–Fri with 30-min time slots,
+ * color-coded by content type (ingresos, controles, blocks, shifts24h).
  */
-export function exportDoctorsToExcel(
+export async function exportDoctorsToExcel(
   doctors: Doctor[],
   appointments: Appointment[],
   blockedDays: BlockedDay[],
-  shifts24h: Shift24h[] = []
-): void {
-  const wb = XLSX.utils.book_new();
+  shifts24h: Shift24h[] = [],
+  period = '2026-06'
+): Promise<void> {
+  // ── Color palette (ARGB — ExcelJS format) ───────────────────────────────
+  const C = {
+    INGRESOS:     'FFB8D7F5',
+    CONTROLES:    'FFC6EFCE',
+    TURNO_24H:    'FF4472C4',
+    POST_TURNO:   'FF9DC3E6',
+    REU_MED:      'FFFFC000',
+    UPC:          'FFFF9999',
+    POLICLINICO:  'FFFFCC99',
+    SALA:         'FFFFB3B3',
+    FERIADO:      'FFFF6666',
+    PERMISO:      'FFFFFF99',
+    LIBRE:        'FFFFF2CC',
+    LICENCIA:     'FFFCE4D6',
+    CAPACITACION: 'FFEAD1DC',
+    PROT:         'FFD9D9D9',
+    ADM:          'FFFFE699',
+    OTRO:         'FFEDEDED',
+    HEADER:       'FF1F3864',
+    SUBHEADER:    'FF2E75B6',
+    DATE_ROW:     'FFD6E4F0',
+    TURNO_COL:    'FFBDD7EE',
+    WHITE:        'FFFFFFFF',
+    NONE:         '00000000',
+  };
 
-  doctors.forEach((doc) => {
-    // 1. Filter elements related to this doctor, sorted by date
-    const docAppointments = appointments
-      .filter((app) => app.doctorId === doc.id)
-      .sort((a, b) => a.date.localeCompare(b.date));
+  const REASON_BG: Record<string, string> = {
+    'UPC':                               C.UPC,
+    'policlinico':                       C.POLICLINICO,
+    'sala':                              C.SALA,
+    'horario protegido':                 C.PROT,
+    'Actividades adm':                   C.ADM,
+    'feriado':                           C.FERIADO,
+    'permiso adm/feriado legal':         C.PERMISO,
+    'reunion de servicio':               C.REU_MED,
+    'libre 22x28':                       C.LIBRE,
+    'licencia':                          C.LICENCIA,
+    'capacitacion/comision de servicio': C.CAPACITACION,
+    'Otro':                              C.OTRO,
+  };
 
-    const docBlocked = blockedDays
-      .filter((block) => block.doctorId === doc.id)
-      .sort((a, b) => a.date.localeCompare(b.date));
+  const TIME_SLOTS = [
+    '08:00 - 08:30', '08:30 - 09:00', '09:00 - 09:30', '09:30 - 10:00',
+    '10:00 - 10:30', '10:30 - 11:00', '11:00 - 11:30', '11:30 - 12:00',
+    '12:00 - 12:30', '12:30 - 13:00', '13:00 - 13:30',
+  ];
 
-    const docShifts24h = shifts24h
-      .filter((s) => s.doctorId === doc.id)
-      .sort((a, b) => a.date.localeCompare(b.date));
+  const DAY_LABELS = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES'];
 
-    // 2. Prepare structured data array for formatting
-    const excelRows: any[] = [];
+  const LEGEND_ITEMS: [string, string][] = [
+    ['UPC',                               C.UPC],
+    ['policlinico',                       C.POLICLINICO],
+    ['sala',                              C.SALA],
+    ['horario protegido',                 C.PROT],
+    ['Actividades adm',                   C.ADM],
+    ['feriado',                           C.FERIADO],
+    ['permiso adm/feriado legal',         C.PERMISO],
+    ['reunion de servicio',               C.REU_MED],
+    ['libre 22x28',                       C.LIBRE],
+    ['licencia',                          C.LICENCIA],
+    ['capacitacion/comision de servicio', C.CAPACITACION],
+    ['INGRESOS nuevos',                   C.INGRESOS],
+    ['CONTROLES',                         C.CONTROLES],
+    ['TURNO 24h',                         C.TURNO_24H],
+    ['POST TURNO',                        C.POST_TURNO],
+  ];
 
-    // Header Metadata
-    excelRows.push(['SISTEMA DE PLANIFICACIÓN DE TURNOS Y CUPOS MÉDICOS']);
-    excelRows.push([`FICHA DE AGENDA: ${doc.name.toUpperCase()}`]);
-    excelRows.push([`Especialidad: ${doc.specialty}`]);
-    excelRows.push([`RUT Médico: ${doc.rut || 'No especificado'}`]);
-    excelRows.push([`Jornada Fija de Atención: ${doc.defaultShift === 'Tarde' ? 'Tarde (Lunes a Viernes)' : 'Mañana (Lunes a Viernes)'}`]);
-    excelRows.push([`Estado del Médico: ${doc.isActive ? 'Activo' : 'Inactivo'}`]);
-    excelRows.push([]); // blank row
-
-    // Summary Statistics
-    const totalNewAdmissions = docAppointments.reduce((acc, curr) => acc + curr.newAdmissions, 0);
-    const totalControls = docAppointments.reduce((acc, curr) => acc + curr.controls, 0);
-    const totalPatientsPlanned = totalNewAdmissions + totalControls;
-
-    excelRows.push(['RESUMEN DE PLANIFICACIÓN']);
-    excelRows.push(['Total Ingresos Nuevos Planificados', totalNewAdmissions]);
-    excelRows.push(['Total Controles Planificados', totalControls]);
-    excelRows.push(['Total Pacientes Planificados', totalPatientsPlanned]);
-    excelRows.push(['Total Bloqueos Registrados', docBlocked.length]);
-    excelRows.push(['Total Guardias de 24h Programadas', docShifts24h.length]);
-    excelRows.push([]); // blank row
-
-    // Section 1: Quota Allocations
-    excelRows.push(['1. CUPOS Y VOLUMEN DE PACIENTES PLANIFICADOS POR DÍA']);
-    excelRows.push([
-      'Fecha',
-      'Jornada',
-      'Cupos Ingresos Nuevos',
-      'Cupos Controles',
-      'Total Pacientes del Bloque',
-      'Observaciones / Notas de Planificación'
-    ]);
-
-    if (docAppointments.length === 0) {
-      excelRows.push(['(No hay programación de cupos registrada para este doctor)', '', '', '', '', '']);
-    } else {
-      docAppointments.forEach((app) => {
-        const blockTotal = app.newAdmissions + app.controls;
-        
-        let scheduleIntro = '';
-        if (app.shift === 'Mañana') {
-          const start = app.startTime || '09:00';
-          const extraBlocks = [];
-          if (app.include800) extraBlocks.push('08:00 AM');
-          if (app.include830) extraBlocks.push('08:30 AM');
-          scheduleIntro = `[Inicia ${start} AM${extraBlocks.length > 0 ? `, Módulos extra: ${extraBlocks.join(', ')}` : ''}] `;
-        }
-        
-        excelRows.push([
-          app.date,
-          app.shift,
-          app.newAdmissions,
-          app.controls,
-          blockTotal,
-          scheduleIntro + (app.notes || '')
-        ]);
-      });
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  function getWeeks(p: string): string[][] {
+    const [y, m] = p.split('-').map(Number);
+    const result: string[][] = [];
+    let cursor = new Date(y, m - 1, 1);
+    while (cursor.getDay() !== 1) cursor.setDate(cursor.getDate() - 1);
+    for (let w = 0; w < 7; w++) {
+      const week: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const d = new Date(cursor);
+        d.setDate(cursor.getDate() + i);
+        week.push(formatDateString(d));
+      }
+      if (week.some(ds => Number(ds.split('-')[1]) === m)) result.push(week);
+      cursor.setDate(cursor.getDate() + 7);
+      if (cursor.getMonth() > m - 1) break;
     }
+    return result;
+  }
 
-    excelRows.push([]); // blank separator
-    excelRows.push([]); // blank separator
+  function fmtDate(ds: string): string {
+    const [, mo, d] = ds.split('-').map(Number);
+    const MONTHS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    return `${d} ${MONTHS[mo - 1]}`;
+  }
 
-    // Section 2: Blocked Days
-    excelRows.push(['2. CONTRATIEMPOS Y BLOQUEOS DE AGENDA']);
-    excelRows.push([
-      'Fecha Bloqueada',
-      'Bloque Horario',
-      'Causa/Motivo de Bloqueo',
-      'Notas / Observaciones de Respaldo'
-    ]);
-
-    if (docBlocked.length === 0) {
-      excelRows.push(['(No hay bloqueos ni contratiempos programados)', '', '', '']);
-    } else {
-      docBlocked.forEach((b) => {
-        const fullReason = b.reason === 'Otro' ? b.customReason || 'Otro contratiempo' : b.reason;
-        const timeRangeStr = b.startTime && b.endTime ? ` (${b.startTime} - ${b.endTime})` : '';
-        excelRows.push([
-          b.date,
-          `${b.shift}${timeRangeStr}`,
-          fullReason,
-          b.notes || ''
-        ]);
-      });
+  function applyStyle(
+    cell: ExcelJS.Cell,
+    bg: string,
+    bold: boolean,
+    fc: string,
+    halign: ExcelJS.Alignment['horizontal'] = 'center'
+  ) {
+    if (bg && bg !== C.NONE) {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
     }
+    cell.font = { bold, color: { argb: fc }, size: 9, name: 'Calibri' };
+    cell.alignment = { horizontal: halign, vertical: 'middle', wrapText: true };
+    cell.border = {
+      top:    { style: 'thin', color: { argb: 'FFCCCCCC' } },
+      bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+      left:   { style: 'thin', color: { argb: 'FFCCCCCC' } },
+      right:  { style: 'thin', color: { argb: 'FFCCCCCC' } },
+    };
+  }
 
-    excelRows.push([]); // blank separator
-    excelRows.push([]); // blank separator
-
-    // Section 3: 24h Guard Shifts
-    excelRows.push(['3. DIAS CON TURNO DE GUARDIA 24 HORAS']);
-    excelRows.push([
-      'Fecha de la Guardia',
-      'Tipo de Guardia',
-      'Estado',
-      'Observación / Respaldo'
-    ]);
-
-    if (docShifts24h.length === 0) {
-      excelRows.push(['(No registrado con turnos de guardia 24h para esta semana)', '', '', '']);
-    } else {
-      docShifts24h.forEach((s) => {
-        excelRows.push([
-          s.date,
-          'Guardia 24 Horas Activa',
-          'En Servicio de Urgencia/Respaldo',
-          s.notes || 'Asignado de forma manual desde el portal'
-        ]);
-      });
+  function resolveSlot(
+    dateStr: string,
+    slotIdx: number,
+    docApps: (Appointment & { status?: string })[],
+    docBlocks: BlockedDay[],
+    docShifts: Shift24h[],
+    postTurnoDates: Set<string>,
+    isTarde: boolean
+  ): { text: string; bg: string; white: boolean } | null {
+    if (docShifts.some(s => s.date === dateStr)) {
+      const text = slotIdx === 0 ? 'TURNO' : slotIdx === 1 ? '24h' : '';
+      return text ? { text, bg: C.TURNO_24H, white: true } : null;
     }
+    if (postTurnoDates.has(dateStr)) {
+      const text = slotIdx === 0 ? 'POST' : slotIdx === 1 ? 'TURNO' : '';
+      return text ? { text, bg: C.POST_TURNO, white: false } : null;
+    }
+    const block = docBlocks.find(b => b.date === dateStr);
+    if (block) {
+      const bg = REASON_BG[block.reason] || C.OTRO;
+      if (block.reason === 'reunion de servicio') {
+        return slotIdx === 1 ? { text: 'REU MED', bg, white: false } : null;
+      }
+      if (slotIdx === 0) {
+        const label = block.reason === 'Otro'
+          ? (block.customReason || 'OTRO').toUpperCase()
+          : block.reason.toUpperCase();
+        return { text: label, bg, white: false };
+      }
+      return null;
+    }
+    const app = docApps.find(a => a.date === dateStr && (a as any).status !== 'Cancelada');
+    if (app) {
+      const ingresosSlot = isTarde ? 3 : 2;
+      const controlesSlot = isTarde ? 5 : 4;
+      if (slotIdx === 0 && app.include800) return { text: '08:00', bg: C.INGRESOS, white: false };
+      if (slotIdx === 1 && app.include830) return { text: '08:30', bg: C.INGRESOS, white: false };
+      if (slotIdx === ingresosSlot && app.newAdmissions > 0)
+        return { text: `${app.newAdmissions} INGRESOS`, bg: C.INGRESOS, white: false };
+      if (slotIdx === controlesSlot && app.controls > 0)
+        return { text: `${app.controls} CONTROLES`, bg: C.CONTROLES, white: false };
+    }
+    return null;
+  }
 
-    // Convert array of arrays to Worksheet
-    const sheetName = doc.name.replace(/[\[\]\*\\\?\:\/]/g, '').slice(0, 30) || `Doc_${doc.id}`;
-    const ws = XLSX.utils.aoa_to_sheet(excelRows);
+  // ── Build workbook with ExcelJS ──────────────────────────────────────────
+  const wb = new ExcelJS.Workbook();
+  const weeks = getWeeks(period);
 
-    // Apply basic column widths to make things legible
-    const colWidths = [
-      { wch: 15 }, // Fecha
-      { wch: 12 }, // Jornada
-      { wch: 22 }, // Cupos Ingresos Nuevos
-      { wch: 18 }, // Cupos Controles
-      { wch: 25 }, // Total Pacientes
-      { wch: 45 }, // Observaciones
+  // Group: first week alone, then pairs
+  const weekGroups: string[][][] = [];
+  if (weeks.length > 0) weekGroups.push([weeks[0]]);
+  for (let i = 1; i < weeks.length; i += 2) {
+    weekGroups.push(i + 1 < weeks.length ? [weeks[i], weeks[i + 1]] : [weeks[i]]);
+  }
+
+  for (const doc of doctors) {
+    const docApps   = appointments.filter(a => a.doctorId === doc.id);
+    const docBlocks = blockedDays.filter(b => b.doctorId === doc.id);
+    const docShifts = shifts24h.filter(s => s.doctorId === doc.id);
+    const isTarde   = doc.defaultShift === 'Tarde';
+
+    const postTurnoDates = new Set<string>();
+    docShifts.forEach(s => {
+      const [y, mo, d] = s.date.split('-').map(Number);
+      postTurnoDates.add(formatDateString(new Date(y, mo - 1, d + 1)));
+    });
+
+    const sheetName = doc.sheetName.replace(/[\[\]\*\\\?\:\/]/g, '').slice(0, 30) || `Doc_${doc.id}`;
+    const ws = wb.addWorksheet(sheetName);
+
+    // Column widths (13 cols: HORARIO + 5days + TURNO + HORARIO + 5days)
+    ws.columns = [
+      { width: 16 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 },
+      { width: 8 },
+      { width: 16 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 },
     ];
-    ws['!cols'] = colWidths;
 
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    let rowNum = 1; // ExcelJS is 1-indexed
+
+    // Doctor name header
+    const headerRow = ws.getRow(rowNum);
+    headerRow.height = 22;
+    const headerCell = headerRow.getCell(1);
+    headerCell.value = doc.sheetName;
+    applyStyle(headerCell, C.HEADER, true, C.WHITE);
+    ws.mergeCells(rowNum, 1, rowNum, 13);
+    rowNum++;
+
+    for (let gi = 0; gi < weekGroups.length; gi++) {
+      if (gi > 0) { rowNum++; } // blank gap between week groups
+
+      const group = weekGroups[gi];
+      const isPair = group.length === 2;
+
+      if (!isPair) {
+        const week = group[0];
+
+        // Column headers
+        const hRow = ws.getRow(rowNum);
+        hRow.height = 18;
+        const hLabel = hRow.getCell(1);
+        hLabel.value = 'HORARIO';
+        applyStyle(hLabel, C.SUBHEADER, true, C.WHITE);
+        DAY_LABELS.forEach((d, i) => {
+          const c = hRow.getCell(i + 2);
+          c.value = d;
+          applyStyle(c, C.SUBHEADER, true, C.WHITE);
+        });
+        rowNum++;
+
+        // Date row
+        const dRow = ws.getRow(rowNum);
+        dRow.height = 16;
+        applyStyle(dRow.getCell(1), C.DATE_ROW, false, 'FF111111');
+        week.forEach((ds, i) => {
+          const c = dRow.getCell(i + 2);
+          c.value = fmtDate(ds);
+          applyStyle(c, C.DATE_ROW, true, 'FF111111');
+        });
+        rowNum++;
+
+        // Time slots
+        for (let si = 0; si < TIME_SLOTS.length; si++) {
+          const tRow = ws.getRow(rowNum);
+          tRow.height = 18;
+          const slotCell = tRow.getCell(1);
+          slotCell.value = TIME_SLOTS[si];
+          applyStyle(slotCell, C.NONE, false, 'FF404040', 'left');
+
+          week.forEach((ds, di) => {
+            const r = resolveSlot(ds, si, docApps, docBlocks, docShifts, postTurnoDates, isTarde);
+            const c = tRow.getCell(di + 2);
+            if (r) {
+              c.value = r.text;
+              applyStyle(c, r.bg, true, r.white ? C.WHITE : 'FF1A1A1A');
+            } else {
+              applyStyle(c, C.NONE, false, 'FF111111');
+            }
+          });
+          rowNum++;
+        }
+
+      } else {
+        const [weekA, weekB] = group;
+
+        // Weekend turno detection
+        const satAfterA = new Date(...(weekA[4].split('-').map(Number) as [number, number, number]));
+        satAfterA.setDate(satAfterA.getDate() + 1);
+        const satStr = formatDateString(satAfterA);
+        const sunStr = formatDateString(new Date(satAfterA.getTime() + 86400000));
+        const hasSun = docShifts.some(s => s.date === sunStr);
+        const hasSat = docShifts.some(s => s.date === satStr);
+        const turnoLabel = hasSun ? ['TURNO', 'DOMINGO'] : hasSat ? ['TURNO', 'SABADO'] : [];
+
+        // Column headers for both weeks
+        const hRow = ws.getRow(rowNum);
+        hRow.height = 18;
+        const hL = hRow.getCell(1); hL.value = 'HORARIO'; applyStyle(hL, C.SUBHEADER, true, C.WHITE);
+        DAY_LABELS.forEach((d, i) => { const c = hRow.getCell(i + 2); c.value = d; applyStyle(c, C.SUBHEADER, true, C.WHITE); });
+        applyStyle(hRow.getCell(7), C.TURNO_COL, false, 'FF111111');
+        const hR = hRow.getCell(8); hR.value = 'HORARIO'; applyStyle(hR, C.SUBHEADER, true, C.WHITE);
+        DAY_LABELS.forEach((d, i) => { const c = hRow.getCell(i + 9); c.value = d; applyStyle(c, C.SUBHEADER, true, C.WHITE); });
+        rowNum++;
+
+        // Date rows for both weeks
+        const dRow = ws.getRow(rowNum);
+        dRow.height = 16;
+        applyStyle(dRow.getCell(1), C.DATE_ROW, false, 'FF111111');
+        weekA.forEach((ds, i) => { const c = dRow.getCell(i + 2); c.value = fmtDate(ds); applyStyle(c, C.DATE_ROW, true, 'FF111111'); });
+        applyStyle(dRow.getCell(7), C.TURNO_COL, false, 'FF111111');
+        applyStyle(dRow.getCell(8), C.DATE_ROW, false, 'FF111111');
+        weekB.forEach((ds, i) => { const c = dRow.getCell(i + 9); c.value = fmtDate(ds); applyStyle(c, C.DATE_ROW, true, 'FF111111'); });
+        rowNum++;
+
+        // Time slots for both weeks
+        for (let si = 0; si < TIME_SLOTS.length; si++) {
+          const tRow = ws.getRow(rowNum);
+          tRow.height = 18;
+
+          // Left time label
+          const sL = tRow.getCell(1); sL.value = TIME_SLOTS[si]; applyStyle(sL, C.NONE, false, 'FF404040', 'left');
+          weekA.forEach((ds, di) => {
+            const r = resolveSlot(ds, si, docApps, docBlocks, docShifts, postTurnoDates, isTarde);
+            const c = tRow.getCell(di + 2);
+            if (r) { c.value = r.text; applyStyle(c, r.bg, true, r.white ? C.WHITE : 'FF1A1A1A'); }
+            else { applyStyle(c, C.NONE, false, 'FF111111'); }
+          });
+
+          // TURNO separator
+          const tText = turnoLabel[si] || '';
+          const tCol = tRow.getCell(7);
+          if (tText) { tCol.value = tText; applyStyle(tCol, C.TURNO_24H, true, C.WHITE); }
+          else { applyStyle(tCol, C.TURNO_COL, false, 'FF111111'); }
+
+          // Right time label
+          const sR = tRow.getCell(8); sR.value = TIME_SLOTS[si]; applyStyle(sR, C.NONE, false, 'FF404040', 'left');
+          weekB.forEach((ds, di) => {
+            const r = resolveSlot(ds, si, docApps, docBlocks, docShifts, postTurnoDates, isTarde);
+            const c = tRow.getCell(di + 9);
+            if (r) { c.value = r.text; applyStyle(c, r.bg, true, r.white ? C.WHITE : 'FF1A1A1A'); }
+            else { applyStyle(c, C.NONE, false, 'FF111111'); }
+          });
+
+          rowNum++;
+        }
+      }
+    }
+
+    // ── Legend ──────────────────────────────────────────────────────────────
+    rowNum++;
+    const legHeader = ws.getRow(rowNum);
+    legHeader.height = 18;
+    const lhCell = legHeader.getCell(1);
+    lhCell.value = 'LEYENDA';
+    applyStyle(lhCell, C.SUBHEADER, true, C.WHITE, 'left');
+    ws.mergeCells(rowNum, 1, rowNum, 3);
+    rowNum++;
+
+    for (const [label, bg] of LEGEND_ITEMS) {
+      const lRow = ws.getRow(rowNum);
+      lRow.height = 16;
+      const lCell = lRow.getCell(1);
+      lCell.value = label;
+      applyStyle(lCell, bg, false, bg === C.TURNO_24H ? C.WHITE : 'FF1A1A1A', 'left');
+      ws.mergeCells(rowNum, 1, rowNum, 3);
+      rowNum++;
+    }
+  }
+
+  // ── Download ─────────────────────────────────────────────────────────────
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
-
-  // Write and Save
-  const fileName = `Planificacion_Ambulatoria_Metas_${new Date().toISOString().slice(0, 10)}.xlsx`;
-  XLSX.writeFile(wb, fileName);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Programacion_Consultas_${period}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

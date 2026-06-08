@@ -451,6 +451,26 @@ export async function exportDoctorsToExcel(
     ws.mergeCells(rowNum, 1, rowNum, 13);
     rowNum++;
 
+    // ── Legend (esquina superior izquierda) ──────────────────────────────
+    const legHeader = ws.getRow(rowNum);
+    legHeader.height = 18;
+    const lhCell = legHeader.getCell(1);
+    lhCell.value = 'LEYENDA';
+    applyStyle(lhCell, C.SUBHEADER, true, C.WHITE, 'left');
+    ws.mergeCells(rowNum, 1, rowNum, 3);
+    rowNum++;
+
+    for (const [label, bg] of LEGEND_ITEMS) {
+      const lRow = ws.getRow(rowNum);
+      lRow.height = 16;
+      const lCell = lRow.getCell(1);
+      lCell.value = label;
+      applyStyle(lCell, bg, false, bg === C.TURNO_24H ? C.WHITE : 'FF1A1A1A', 'left');
+      ws.mergeCells(rowNum, 1, rowNum, 3);
+      rowNum++;
+    }
+    rowNum++; // espacio antes del horario
+
     for (let gi = 0; gi < weekGroups.length; gi++) {
       if (gi > 0) { rowNum++; } // blank gap between week groups
 
@@ -572,25 +592,6 @@ export async function exportDoctorsToExcel(
       }
     }
 
-    // ── Legend ──────────────────────────────────────────────────────────────
-    rowNum++;
-    const legHeader = ws.getRow(rowNum);
-    legHeader.height = 18;
-    const lhCell = legHeader.getCell(1);
-    lhCell.value = 'LEYENDA';
-    applyStyle(lhCell, C.SUBHEADER, true, C.WHITE, 'left');
-    ws.mergeCells(rowNum, 1, rowNum, 3);
-    rowNum++;
-
-    for (const [label, bg] of LEGEND_ITEMS) {
-      const lRow = ws.getRow(rowNum);
-      lRow.height = 16;
-      const lCell = lRow.getCell(1);
-      lCell.value = label;
-      applyStyle(lCell, bg, false, bg === C.TURNO_24H ? C.WHITE : 'FF1A1A1A', 'left');
-      ws.mergeCells(rowNum, 1, rowNum, 3);
-      rowNum++;
-    }
   }
 
   // ── Download ─────────────────────────────────────────────────────────────

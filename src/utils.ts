@@ -268,10 +268,13 @@ export async function exportDoctorsToExcel(
     'Otro':                              C.OTRO,
   };
 
-  const TIME_SLOTS = [
-    '08:00 - 08:30', '08:30 - 09:00', '09:00 - 09:30', '09:30 - 10:00',
-    '10:00 - 10:30', '10:30 - 11:00', '11:00 - 11:30', '11:30 - 12:00',
-    '12:00 - 12:30', '12:30 - 13:00', '13:00 - 13:30',
+  // Franjas completas: índices 0-10 mañana, 11-16 tarde
+  const ALL_TIME_SLOTS = [
+    '08:00 - 08:30', '08:30 - 09:00', '09:00 - 09:30', '09:30 - 10:00',  // 0-3
+    '10:00 - 10:30', '10:30 - 11:00', '11:00 - 11:30', '11:30 - 12:00',  // 4-7
+    '12:00 - 12:30', '12:30 - 13:00', '13:00 - 13:30',                   // 8-10
+    '14:00 - 14:30', '14:30 - 15:00', '15:00 - 15:30',                   // 11-13
+    '15:30 - 16:00', '16:00 - 16:30', '16:30 - 17:00',                   // 14-16
   ];
 
   const DAY_LABELS = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES'];
@@ -379,12 +382,14 @@ export async function exportDoctorsToExcel(
     // Consulta → cada ingreso/control ocupa su propia franja de 30 min
     const app = docApps.find(a => a.date === dateStr && (a as any).status !== 'Cancelada');
     if (app) {
-      // Slot de inicio: include800 → 08:00 (idx 0), include830 → 08:30 (idx 1),
-      // turno tarde → 09:30 (idx 3), por defecto → 09:00 (idx 2)
+      // Slot de inicio (índice absoluto en ALL_TIME_SLOTS):
+      // mañana: 09:00 (idx 2); tarde: 14:00 (idx 11)
+      // include800/include830 solo aplican a turno mañana
       let startSlot: number;
-      if (app.include800) startSlot = 0;
+      if (isTarde) startSlot = 11;
+      else if (app.include800) startSlot = 0;
       else if (app.include830) startSlot = 1;
-      else startSlot = isTarde ? 3 : 2;
+      else startSlot = 2;
 
       const ingresosEnd = startSlot + (app.newAdmissions || 0);
       const controlesEnd = ingresosEnd + (app.controls || 0);
@@ -416,6 +421,8 @@ export async function exportDoctorsToExcel(
     const docBlocks = blockedDays.filter(b => b.doctorId === doc.id);
     const docShifts = shifts24h.filter(s => s.doctorId === doc.id);
     const isTarde   = doc.defaultShift === 'Tarde';
+    // Rango de franjas horarias según turno
+    const slotRange = isTarde ? { start: 11, end: 17 } : { start: 0, end: 11 };
 
     const postTurnoDates = new Set<string>();
     docShifts.forEach(s => {
@@ -477,12 +484,12 @@ export async function exportDoctorsToExcel(
         });
         rowNum++;
 
-        // Time slots
-        for (let si = 0; si < TIME_SLOTS.length; si++) {
+        // Time slots (solo el rango del turno del médico)
+        for (let si = slotRange.start; si < slotRange.end; si++) {
           const tRow = ws.getRow(rowNum);
           tRow.height = 18;
           const slotCell = tRow.getCell(1);
-          slotCell.value = TIME_SLOTS[si];
+          slotCell.value = ALL_TIME_SLOTS[si];
           applyStyle(slotCell, C.NONE, false, 'FF404040', 'left');
 
           week.forEach((ds, di) => {
@@ -530,13 +537,14 @@ export async function exportDoctorsToExcel(
         weekB.forEach((ds, i) => { const c = dRow.getCell(i + 9); c.value = fmtDate(ds); applyStyle(c, C.DATE_ROW, true, 'FF111111'); });
         rowNum++;
 
-        // Time slots for both weeks
-        for (let si = 0; si < TIME_SLOTS.length; si++) {
+        // Time slots for both weeks (solo el rango del turno del médico)
+        for (let si = slotRange.start; si < slotRange.end; si++) {
           const tRow = ws.getRow(rowNum);
           tRow.height = 18;
+          const relSi = si - slotRange.start; // índice relativo para turnoLabel
 
           // Left time label
-          const sL = tRow.getCell(1); sL.value = TIME_SLOTS[si]; applyStyle(sL, C.NONE, false, 'FF404040', 'left');
+          const sL = tRow.getCell(1); sL.value = ALL_TIME_SLOTS[si]; applyStyle(sL, C.NONE, false, 'FF404040', 'left');
           weekA.forEach((ds, di) => {
             const r = resolveSlot(ds, si, docApps, docBlocks, docShifts, postTurnoDates, isTarde);
             const c = tRow.getCell(di + 2);
@@ -545,13 +553,13 @@ export async function exportDoctorsToExcel(
           });
 
           // TURNO separator
-          const tText = turnoLabel[si] || '';
+          const tText = turnoLabel[relSi] || '';
           const tCol = tRow.getCell(7);
           if (tText) { tCol.value = tText; applyStyle(tCol, C.TURNO_24H, true, C.WHITE); }
           else { applyStyle(tCol, C.TURNO_COL, false, 'FF111111'); }
 
           // Right time label
-          const sR = tRow.getCell(8); sR.value = TIME_SLOTS[si]; applyStyle(sR, C.NONE, false, 'FF404040', 'left');
+          const sR = tRow.getCell(8); sR.value = ALL_TIME_SLOTS[si]; applyStyle(sR, C.NONE, false, 'FF404040', 'left');
           weekB.forEach((ds, di) => {
             const r = resolveSlot(ds, si, docApps, docBlocks, docShifts, postTurnoDates, isTarde);
             const c = tRow.getCell(di + 9);

@@ -438,6 +438,8 @@ export async function exportDoctorsToExcel(
       { width: 16 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 },
       { width: 8 },
       { width: 16 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 },
+      { width: 3 },
+      { width: 22 }, { width: 22 }, { width: 22 },
     ];
 
     let rowNum = 1; // ExcelJS is 1-indexed
@@ -575,23 +577,23 @@ export async function exportDoctorsToExcel(
       }
     }
 
-    // ── Legend: al lado de la primera semana (cols 8-10) ─────────────────
+    // ── Legend: columna 15+ (fuera de las tablas de semanas) ──────────────
     if (firstWeekStartRow > 0) {
       let lr = firstWeekStartRow;
       const legH = ws.getRow(lr);
       legH.height = 18;
-      const lhC = legH.getCell(8);
+      const lhC = legH.getCell(15);
       lhC.value = 'LEYENDA';
       applyStyle(lhC, C.SUBHEADER, true, C.WHITE, 'left');
-      ws.mergeCells(lr, 8, lr, 10);
+      ws.mergeCells(lr, 15, lr, 17);
       lr++;
       for (const [label, bg] of LEGEND_ITEMS) {
         const lRow = ws.getRow(lr);
         lRow.height = 16;
-        const lCell = lRow.getCell(8);
+        const lCell = lRow.getCell(15);
         lCell.value = label;
         applyStyle(lCell, bg, false, bg === C.TURNO_24H ? C.WHITE : 'FF1A1A1A', 'left');
-        ws.mergeCells(lr, 8, lr, 10);
+        ws.mergeCells(lr, 15, lr, 17);
         lr++;
       }
     }

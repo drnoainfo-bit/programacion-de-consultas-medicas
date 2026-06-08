@@ -349,39 +349,54 @@ export async function exportDoctorsToExcel(
     postTurnoDates: Set<string>,
     isTarde: boolean
   ): { text: string; bg: string; white: boolean } | null {
+    // Turno 24h → bloquear todos los slots del día
     if (docShifts.some(s => s.date === dateStr)) {
-      const text = slotIdx === 0 ? 'TURNO' : slotIdx === 1 ? '24h' : '';
-      return text ? { text, bg: C.TURNO_24H, white: true } : null;
+      return { text: slotIdx === 0 ? 'TURNO 24h' : '', bg: C.TURNO_24H, white: true };
     }
+
+    // Post-turno → dejar en blanco (el médico hace otras actividades asignadas desde el sistema)
     if (postTurnoDates.has(dateStr)) {
-      const text = slotIdx === 0 ? 'POST' : slotIdx === 1 ? 'TURNO' : '';
-      return text ? { text, bg: C.POST_TURNO, white: false } : null;
+      return null;
     }
+
+    // Día bloqueado → mostrar motivo en slot 0, color en todos los slots
     const block = docBlocks.find(b => b.date === dateStr);
     if (block) {
       const bg = REASON_BG[block.reason] || C.OTRO;
       if (block.reason === 'reunion de servicio') {
+        // Solo 1 slot para reunión (no bloquea todo el día)
         return slotIdx === 1 ? { text: 'REU MED', bg, white: false } : null;
       }
-      if (slotIdx === 0) {
-        const label = block.reason === 'Otro'
-          ? (block.customReason || 'OTRO').toUpperCase()
-          : block.reason.toUpperCase();
-        return { text: label, bg, white: false };
-      }
-      return null;
+      // Motivo en slot 0, resto del día con mismo color
+      const label = slotIdx === 0
+        ? (block.reason === 'Otro'
+            ? (block.customReason || 'OTRO').toUpperCase()
+            : block.reason.toUpperCase())
+        : '';
+      return { text: label, bg, white: false };
     }
+
+    // Consulta → cada ingreso/control ocupa su propia franja de 30 min
     const app = docApps.find(a => a.date === dateStr && (a as any).status !== 'Cancelada');
     if (app) {
-      const ingresosSlot = isTarde ? 3 : 2;
-      const controlesSlot = isTarde ? 5 : 4;
-      if (slotIdx === 0 && app.include800) return { text: '08:00', bg: C.INGRESOS, white: false };
-      if (slotIdx === 1 && app.include830) return { text: '08:30', bg: C.INGRESOS, white: false };
-      if (slotIdx === ingresosSlot && app.newAdmissions > 0)
-        return { text: `${app.newAdmissions} INGRESOS`, bg: C.INGRESOS, white: false };
-      if (slotIdx === controlesSlot && app.controls > 0)
-        return { text: `${app.controls} CONTROLES`, bg: C.CONTROLES, white: false };
+      // Slot de inicio: include800 → 08:00 (idx 0), include830 → 08:30 (idx 1),
+      // turno tarde → 09:30 (idx 3), por defecto → 09:00 (idx 2)
+      let startSlot: number;
+      if (app.include800) startSlot = 0;
+      else if (app.include830) startSlot = 1;
+      else startSlot = isTarde ? 3 : 2;
+
+      const ingresosEnd = startSlot + (app.newAdmissions || 0);
+      const controlesEnd = ingresosEnd + (app.controls || 0);
+
+      if (slotIdx >= startSlot && slotIdx < ingresosEnd) {
+        return { text: 'INGRESO', bg: C.INGRESOS, white: false };
+      }
+      if (slotIdx >= ingresosEnd && slotIdx < controlesEnd) {
+        return { text: 'CONTROL', bg: C.CONTROLES, white: false };
+      }
     }
+
     return null;
   }
 

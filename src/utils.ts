@@ -451,30 +451,13 @@ export async function exportDoctorsToExcel(
     ws.mergeCells(rowNum, 1, rowNum, 13);
     rowNum++;
 
-    // ── Legend (esquina superior izquierda) ──────────────────────────────
-    const legHeader = ws.getRow(rowNum);
-    legHeader.height = 18;
-    const lhCell = legHeader.getCell(1);
-    lhCell.value = 'LEYENDA';
-    applyStyle(lhCell, C.SUBHEADER, true, C.WHITE, 'left');
-    ws.mergeCells(rowNum, 1, rowNum, 3);
-    rowNum++;
-
-    for (const [label, bg] of LEGEND_ITEMS) {
-      const lRow = ws.getRow(rowNum);
-      lRow.height = 16;
-      const lCell = lRow.getCell(1);
-      lCell.value = label;
-      applyStyle(lCell, bg, false, bg === C.TURNO_24H ? C.WHITE : 'FF1A1A1A', 'left');
-      ws.mergeCells(rowNum, 1, rowNum, 3);
-      rowNum++;
-    }
-    rowNum++; // espacio antes del horario
+    let firstWeekStartRow = -1;
 
     for (let gi = 0; gi < weekGroups.length; gi++) {
       if (gi > 0) { rowNum++; } // blank gap between week groups
 
       const group = weekGroups[gi];
+      if (gi === 0) firstWeekStartRow = rowNum;
       const isPair = group.length === 2;
 
       if (!isPair) {
@@ -592,6 +575,26 @@ export async function exportDoctorsToExcel(
       }
     }
 
+    // ── Legend: al lado de la primera semana (cols 8-10) ─────────────────
+    if (firstWeekStartRow > 0) {
+      let lr = firstWeekStartRow;
+      const legH = ws.getRow(lr);
+      legH.height = 18;
+      const lhC = legH.getCell(8);
+      lhC.value = 'LEYENDA';
+      applyStyle(lhC, C.SUBHEADER, true, C.WHITE, 'left');
+      ws.mergeCells(lr, 8, lr, 10);
+      lr++;
+      for (const [label, bg] of LEGEND_ITEMS) {
+        const lRow = ws.getRow(lr);
+        lRow.height = 16;
+        const lCell = lRow.getCell(8);
+        lCell.value = label;
+        applyStyle(lCell, bg, false, bg === C.TURNO_24H ? C.WHITE : 'FF1A1A1A', 'left');
+        ws.mergeCells(lr, 8, lr, 10);
+        lr++;
+      }
+    }
   }
 
   // ── Download ─────────────────────────────────────────────────────────────

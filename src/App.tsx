@@ -23,6 +23,7 @@ import BlockingsManager from './components/BlockingsManager';
 import AppointmentsManager from './components/AppointmentsManager';
 import ValidationPanel from './components/ValidationPanel';
 import SheetsPanel from './components/SheetsPanel';
+import MonthlyCalendar from './components/MonthlyCalendar';
 import ConfirmModal from './components/ConfirmModal';
 import {
   Calendar,
@@ -46,7 +47,7 @@ export default function App() {
   const [appointments, setAppointments] = useState<(Appointment & { status: string })[]>([]);
   const [shifts24h, setShifts24h] = useState<Shift24h[]>([]);
 
-  const [activeTab, setActiveTab] = useState<'calendar' | 'appointments' | 'blockings' | 'doctors' | 'sheets'>('calendar');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'monthly' | 'appointments' | 'blockings' | 'doctors' | 'sheets'>('calendar');
   const [shortcutData, setShortcutData] = useState<{
     doctorId?: string;
     date?: string;
@@ -339,7 +340,17 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('appointments')}
+            onClick={() => { setShortcutData(null); setActiveTab('monthly'); }}
+            className={`flex-1 min-w-[100px] py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+              activeTab === 'monthly' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+            id="tab-monthly"
+          >
+            🗓️ Agenda Mensual
+          </button>
+
+          <button
+            onClick={() => setActiveTab('appointments')
             className={`flex-1 min-w-[100px] py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
               activeTab === 'appointments' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
             }`}
@@ -406,6 +417,18 @@ export default function App() {
                 onAddBlockClick={handleCalendarAddBlock}
               />
             </div>
+          )}
+
+          {activeTab === 'monthly' && (
+            <MonthlyCalendar
+              doctors={doctors}
+              appointments={appointments}
+              blockedDays={blockedDays}
+              shifts24h={shifts24h}
+              onAddAppointmentClick={handleCalendarAddAppointment}
+              onAddBlockClick={handleCalendarAddBlock}
+              onToggleShift24h={handleToggleShift24h}
+            />
           )}
 
           {activeTab === 'appointments' && (

@@ -350,7 +350,7 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('appointments')
+            onClick={() => setActiveTab('appointments')}
             className={`flex-1 min-w-[100px] py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
               activeTab === 'appointments' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
             }`}

@@ -61,7 +61,7 @@ export default function WeeklyCalendar({
   const activeDoctors = doctors.filter(d => d.isActive);
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden" id="calendar-root">
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200" id="calendar-root">
       {/* Calendar Header with controls */}
       <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-50">
         <div className="flex items-center gap-3">
@@ -143,11 +143,11 @@ export default function WeeklyCalendar({
         <span>Al {formatReadableDate(formatDateString(weekdays[6]))}</span>
       </div>
 
-      {/* Responsive horizontal scrollable week grid */}
-      <div className="overflow-x-auto" id="week-grid-container">
+      {/* Responsive scrollable week grid — sticky headers */}
+      <div className="overflow-auto max-h-[calc(100vh-340px)] min-h-[300px]" id="week-grid-container">
         <div className="min-w-[1050px] divide-y divide-slate-250">
           {/* Day Headers */}
-          <div className="grid grid-cols-7 bg-slate-50 text-center text-xs font-semibold text-slate-600 select-none">
+          <div className="grid grid-cols-7 bg-slate-50 text-center text-xs font-semibold text-slate-600 select-none sticky top-0 z-20 border-b border-slate-200 shadow-sm">
             {weekdays.map((day, idx) => {
               const dateStr = formatDateString(day);
               const isToday = dateStr === formatDateString(new Date());

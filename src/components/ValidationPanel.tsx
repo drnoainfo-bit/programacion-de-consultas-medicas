@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Doctor, Appointment, BlockedDay, Shift24h } from '../types';
 import ConfirmModal from './ConfirmModal';
 import { formatReadableDate } from '../utils';
-import { AlertTriangle, CheckCircle, Play, Sparkles, Trash2, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Sparkles, Trash2, ShieldAlert } from 'lucide-react';
 
 interface ValidationPanelProps {
   doctors: Doctor[];
@@ -11,7 +11,7 @@ interface ValidationPanelProps {
   shifts24h: Shift24h[];
   selectedPeriod: string; // YYYY-MM format, e.g. "2026-06"
   onAutoSchedule: (generatedApps: Appointment[], generatedGuards?: Shift24h[]) => void;
-  onClearAppointments: () => void;
+  onClearAppointments: () => void | Promise<void>;
 }
 
 export interface RuleViolation {
@@ -38,11 +38,28 @@ export default function ValidationPanel({
   
   const [showAutoConfirm, setShowAutoConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const appointmentsInSelectedPeriod = useMemo(
+    () => appointments.filter(app => app.date.startsWith(selectedPeriod)),
+    [appointments, selectedPeriod]
+  );
 
   // Real-Time Rules Engine
   const violations = useMemo<RuleViolation[]>(() => {
     const list: RuleViolation[] = [];
     const docMap = new Map(doctors.map(d => [d.id, d]));
+    const appointmentsInPeriod = appointments.filter(app => app.date.startsWith(selectedPeriod));
+    const blockedDaysInPeriod = blockedDays.filter(block => block.date.startsWith(selectedPeriod));
+    const rawShiftsInPeriod = shifts24h.filter((shift) => {
+      if (shift.date.startsWith(selectedPeriod)) return true;
+      const [year, month, day] = shift.date.split('-').map(Number);
+      const nextDate = new Date(year, month - 1, day, 12, 0, 0);
+      nextDate.setDate(nextDate.getDate() + 1);
+      const nextDayStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
+      return nextDayStr.startsWith(selectedPeriod);
+    });
+    const shiftsInPeriod = Array.from(
+      new Map(rawShiftsInPeriod.map(shift => [`${shift.doctorId}-${shift.date}`, shift])).values()
+    );
 
     // Helper to get week number of a date string (YYYY-MM-DD)
     const getWeekKey = (dateStr: string) => {
@@ -56,26 +73,14 @@ export default function ValidationPanel({
     // Map with key `${doctorId}-${weekKey}` -> total patients
     const weeklyQuotaCount = new Map<string, number>();
 
-    appointments.forEach((app) => {
+    appointmentsInPeriod.forEach((app) => {
       const doc = docMap.get(app.doctorId);
       if (!doc) return;
 
       const dateStr = app.date;
       const totalPatients = app.newAdmissions + app.controls;
 
-      // 1. Check if date is outside active period
-      if (!dateStr.startsWith(selectedPeriod)) {
-        list.push({
-          id: `outside-period-${app.id}`,
-          type: 'error',
-          category: 'Periodo fuera de rango',
-          message: `La fecha ${dateStr} está fuera del periodo de la rotativa (${selectedPeriod === '2026-06' ? 'Junio 2026' : selectedPeriod}).`,
-          doctorName: doc.name,
-          dateStr
-        });
-      }
-
-      // 2. Schedule on weekend (médico programado en día no disponible)
+      // 1. Schedule on weekend (médico programado en día no disponible)
       const dayOfWeek = new Date(dateStr).getDay(); // 0 is Sunday, 6 is Saturday
       if (dayOfWeek === 0 || dayOfWeek === 6) {
         list.push({
@@ -90,7 +95,7 @@ export default function ValidationPanel({
 
       // 3. Feriado / Feriado Legal (médico asignado en feriado)
       const isFeriadoNational = CHILEAN_FERIADOS_JUNE_2026.includes(dateStr);
-      const hasFeriadoBlock = blockedDays.some(b => 
+      const hasFeriadoBlock = blockedDaysInPeriod.some(b => 
         b.doctorId === app.doctorId && 
         b.date === dateStr && 
         (b.reason === 'feriado' || b.reason === 'permiso adm/feriado legal')
@@ -127,7 +132,7 @@ export default function ValidationPanel({
       }
 
       // 5. Manual Blocking Ignored (bloqueo manual ignorado)
-      const isBlocked = blockedDays.find(b => 
+      const isBlocked = blockedDaysInPeriod.find(b => 
         b.doctorId === app.doctorId && 
         b.date === dateStr && 
         (b.shift === app.shift || b.shift === 'Todo el día')
@@ -183,7 +188,7 @@ export default function ValidationPanel({
         list.push({
           id: `weekly-exceeded-${key}`,
           type: 'warning',
-          category: 'Exceso de Quota Semanal',
+          category: 'Exceso de Cupos Semanales',
           message: `El total de pacientes semanales (${total}) excede la capacidad recomendada de ${maxWeekly} para este médico en la semana ${weekKey.split('W')[1]}.`,
           doctorName: doc.name,
           dateStr: `Semana ${weekKey.split('W')[1]}`
@@ -192,7 +197,7 @@ export default function ValidationPanel({
     });
 
     // 8. 24h Guard Shift Posturno Check (posturno no respetado / turno sin descanso posterior)
-    shifts24h.forEach((shift) => {
+    shiftsInPeriod.forEach((shift) => {
       const doc = docMap.get(shift.doctorId);
       if (!doc) return;
 
@@ -202,7 +207,7 @@ export default function ValidationPanel({
       const nextDayStr = refDate.toISOString().slice(0, 10);
 
       // Check if they have ANY appointments on the day immediately following the 24h guard shift
-      const hasPostApp = appointments.some(app => app.doctorId === shift.doctorId && app.date === nextDayStr);
+      const hasPostApp = appointmentsInPeriod.some(app => app.doctorId === shift.doctorId && app.date === nextDayStr);
       if (hasPostApp) {
         list.push({
           id: `postshift-violation-${shift.id}`,
@@ -216,11 +221,11 @@ export default function ValidationPanel({
     });
 
     // 9. Two-rule conflicts (e.g. 24h shift on same day as a manual blocking or same day as appointment)
-    shifts24h.forEach((shift) => {
+    shiftsInPeriod.forEach((shift) => {
       const doc = docMap.get(shift.doctorId);
       if (!doc) return;
 
-      const sameDayBlock = blockedDays.find(b => b.doctorId === shift.doctorId && b.date === shift.date);
+      const sameDayBlock = blockedDaysInPeriod.find(b => b.doctorId === shift.doctorId && b.date === shift.date);
       if (sameDayBlock) {
         list.push({
           id: `conflict-block-shift-${shift.id}`,
@@ -232,7 +237,7 @@ export default function ValidationPanel({
         });
       }
 
-      const sameDayApp = appointments.find(app => app.doctorId === shift.doctorId && app.date === shift.date);
+      const sameDayApp = appointmentsInPeriod.find(app => app.doctorId === shift.doctorId && app.date === shift.date);
       if (sameDayApp) {
         list.push({
           id: `conflict-app-shift-${shift.id}`,
@@ -245,61 +250,33 @@ export default function ValidationPanel({
       }
     });
 
-    // 10. Multiple 24H guard shifts on the same day (No puede haber dos médicos con guardia el mismo día)
+    // 10. Multiple 24H guard shifts on the same day.
     const guardsByDate = new Map<string, Array<{ docId: string; docName: string }>>();
-    shifts24h.forEach((shift) => {
-      const doc = docMap.get(shift.doctorId);
-      if (!doc) return;
-      if (!guardsByDate.has(shift.date)) {
-        guardsByDate.set(shift.date, []);
-      }
-      guardsByDate.get(shift.date)!.push({ docId: shift.doctorId, docName: doc.name });
-    });
+    shiftsInPeriod
+      .filter(shift => shift.date.startsWith(selectedPeriod))
+      .forEach((shift) => {
+        const doc = docMap.get(shift.doctorId);
+        if (!doc) return;
+        if (!guardsByDate.has(shift.date)) guardsByDate.set(shift.date, []);
+        guardsByDate.get(shift.date)!.push({ docId: shift.doctorId, docName: doc.name });
+      });
 
-    guardsByDate.forEach((docList, dateStr) => {
-      if (docList.length > 1) {
-        const names = docList.map(d => d.docName).join(' y ');
-        list.push({
-          id: `conflict-duplicate-guards-${dateStr}`,
-          type: 'warning',
-          category: 'Colisión de Guardia de 24h',
-          message: `Conflicto de Cobertura: Hay múltiples profesionales (${names}) asignados a Guardia de 24 horas el mismo día. Cada médico debe trabajar un día diferente.`,
-          doctorName: 'Múltiple',
-          dateStr
-        });
-      }
-    });
+    const collisionDates = Array.from(guardsByDate.entries()).filter(([, docList]) => docList.length > 1);
+    if (collisionDates.length > 0) {
+      const names = Array.from(
+        new Set(collisionDates.flatMap(([, docList]) => docList.map(item => item.docName)))
+      ).join(', ');
+      list.push({
+        id: `guard-collision-summary-${selectedPeriod}`,
+        type: 'warning',
+        category: 'Colision de Guardia de 24h',
+        message: `Hay ${collisionDates.length} dia(s) del mes con mas de un profesional asignado a guardia 24h. Profesionales involucrados: ${names}. Revise solo si la cobertura debe ser de un medico por dia.`,
+        doctorName: 'Multiple',
+        dateStr: selectedPeriod
+      });
+    }
 
-    // 11. 6-Day Cycle Mismatch check for manually assigned shifts
-    doctors.forEach((doc) => {
-      const docGuards = shifts24h.filter(s => s.doctorId === doc.id);
-      if (docGuards.length <= 1) return;
-
-      const parseLocalDate = (dateStr: string) => {
-        const [y, m, d] = dateStr.split('-').map(Number);
-        return new Date(y, m - 1, d, 12, 0, 0); // midday to avoid timezone shifting issues
-      };
-
-      const sortedGuards = [...docGuards].sort((a, b) => a.date.localeCompare(b.date));
-      const T0 = parseLocalDate(sortedGuards[0].date);
-
-      for (let i = 1; i < sortedGuards.length; i++) {
-        const guard = sortedGuards[i];
-        const currentD = parseLocalDate(guard.date);
-        const diffDays = Math.round((currentD.getTime() - T0.getTime()) / (1000 * 60 * 60 * 24));
-
-        if (diffDays % 6 !== 0) {
-          list.push({
-            id: `guard-cycle-violation-${guard.id}`,
-            type: 'warning',
-            category: 'Ciclo Rotativo de 6 Días',
-            message: `Desfase en la rotación: Esta fecha está fuera del ciclo regular de guardias de 24h cada 6 días de este profesional. El primer turno programado para el ${doc.name} fue el ${formatReadableDate(sortedGuards[0].date)}, por lo que sus siguientes guardias deberían cumplir un múltiplo de 6 días contados desde esa fecha.`,
-            doctorName: doc.name,
-            dateStr: guard.date
-          });
-        }
-      }
-    });
+    // 11. Manual cycle offsets are allowed and no longer reported as warnings.
 
     return list;
   }, [doctors, appointments, blockedDays, shifts24h, selectedPeriod]);
@@ -454,7 +431,7 @@ export default function ValidationPanel({
             title="Limpiar todas las citas médicas programadas"
           >
             <Trash2 className="w-3.5 h-3.5 shrink-0" />
-            <span>Limpiar Citas</span>
+            <span>Limpiar Citas del Mes</span>
           </button>
         </div>
       </div>
@@ -466,9 +443,9 @@ export default function ValidationPanel({
             {errors.length > 0 ? '!' : '✓'}
           </div>
           <div>
-            <span className="font-extrabold text-slate-800 block">Conflictos Críticos (Reglamento)</span>
+            <span className="font-extrabold text-slate-800 block">Conflictos del Mes</span>
             <span className="text-[11px] text-slate-500 font-medium mt-0.5 block">
-              {errors.length === 0 ? 'Sin infracciones graves vigentes' : `${errors.length} conflicto(s) requiere(n) corrección`}
+              {errors.length === 0 ? 'Sin conflictos graves en el mes' : `${errors.length} conflicto(s) requiere(n) corrección`}
             </span>
           </div>
         </div>
@@ -478,9 +455,9 @@ export default function ValidationPanel({
             {warnings.length > 0 ? 'i' : '✓'}
           </div>
           <div>
-            <span className="font-extrabold text-slate-800 block">Advertencias / Quotas</span>
+            <span className="font-extrabold text-slate-800 block">Advertencias / Cupos</span>
             <span className="text-[11px] text-slate-500 font-medium mt-0.5 block">
-              {warnings.length === 0 ? 'Cupos recomendados equilibrados' : `${warnings.length} advertencia(s) de distribución`}
+              {warnings.length === 0 ? 'Cupos del mes equilibrados' : `${warnings.length} advertencia(s) de distribución`}
             </span>
           </div>
         </div>
@@ -569,9 +546,9 @@ export default function ValidationPanel({
         isOpen={showClearConfirm}
         onClose={() => setShowClearConfirm(false)}
         onConfirm={onClearAppointments}
-        title="Limpiar todas las citas médicas"
-        message="¿Está seguro de que desea limpiar todas las consultas y citas médicas programadas para comenzar la planificación desde cero?"
-        confirmText="Limpiar Citas"
+        title="Limpiar citas del mes"
+        message={`Se eliminaran ${appointmentsInSelectedPeriod.length} cita(s) del mes ${selectedPeriod}. Los bloqueos y guardias se mantendran. Los avisos asociados a esas citas se limpiaran automaticamente si corresponde.`}
+        confirmText="Limpiar Citas del Mes"
         cancelText="Volver"
         type="danger"
       />

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Doctor, Appointment, BlockedDay, Shift24h } from '../types';
 import { getWeekDates, formatDateString, formatReadableDate, getBlockingForSlot } from '../utils';
 import { 
@@ -25,8 +25,9 @@ interface WeeklyCalendarProps {
   appointments: Appointment[];
   blockedDays: BlockedDay[];
   shifts24h: Shift24h[];
-  onAddAppointmentClick: (docId: string, date: string, shift: 'Mañana' | 'Tarde') => void;
-  onAddBlockClick: (docId: string, date: string, shift: 'Mañana' | 'Tarde') => void;
+  selectedPeriod: string;
+  onAddAppointmentClick: (docId: string, date: string, shift: any) => void;
+  onAddBlockClick: (docId: string, date: string, shift: any) => void;
   onToggleShift24h: (docId: string, date: string) => void;
 }
 
@@ -35,11 +36,25 @@ export default function WeeklyCalendar({
   appointments,
   blockedDays,
   shifts24h,
+  selectedPeriod,
   onAddAppointmentClick,
   onAddBlockClick,
   onToggleShift24h,
 }: WeeklyCalendarProps) {
-  const [currentWeekRef, setCurrentWeekRef] = useState<Date>(new Date());
+  const getPeriodStartDate = (period: string) => {
+    const [yearRaw, monthRaw] = period.split('-').map(Number);
+    const now = new Date();
+    const year = Number.isFinite(yearRaw) ? yearRaw : now.getFullYear();
+    const month = Number.isFinite(monthRaw) ? monthRaw : now.getMonth() + 1;
+    return new Date(year, month - 1, 1, 12, 0, 0);
+  };
+
+  const [currentWeekRef, setCurrentWeekRef] = useState<Date>(() => getPeriodStartDate(selectedPeriod));
+
+  useEffect(() => {
+    setCurrentWeekRef(getPeriodStartDate(selectedPeriod));
+  }, [selectedPeriod]);
+
   const weekdays = getWeekDates(currentWeekRef);
 
   const prevWeek = () => {
@@ -54,8 +69,8 @@ export default function WeeklyCalendar({
     setCurrentWeekRef(d);
   };
 
-  const resetToToday = () => {
-    setCurrentWeekRef(new Date());
+  const resetToSelectedMonth = () => {
+    setCurrentWeekRef(getPeriodStartDate(selectedPeriod));
   };
 
   const activeDoctors = doctors.filter(d => d.isActive);
@@ -99,11 +114,11 @@ export default function WeeklyCalendar({
           </button>
           
           <button
-            onClick={resetToToday}
+            onClick={resetToSelectedMonth}
             className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors print:hidden"
             id="btn-current-week"
           >
-            Esta Semana
+            Inicio del Mes
           </button>
           
           <button

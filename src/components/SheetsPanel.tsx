@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 import { Doctor, Appointment, BlockedDay, Shift24h } from '../types';
 import ConfirmModal from './ConfirmModal';
 import { 
@@ -46,11 +46,22 @@ export default function SheetsPanel({
     return matches ? matches[1] : spreadsheetUrl; // fallback to literal if URL doesn't match
   }, [spreadsheetUrl]);
 
-  // Compute cell rows to write to spreadsheet for each doctor in the selected period (e.g. 30 days of June 2026)
+  const periodInfo = useMemo(() => {
+    const [yearRaw, monthRaw] = selectedPeriod.split('-').map(Number);
+    const now = new Date();
+    const year = Number.isFinite(yearRaw) ? yearRaw : now.getFullYear();
+    const month = Number.isFinite(monthRaw) ? monthRaw : now.getMonth() + 1;
+    return {
+      year,
+      month,
+      totalDays: new Date(year, month, 0).getDate(),
+      monthLabel: new Intl.DateTimeFormat('es-CL', { month: 'short' }).format(new Date(year, month - 1, 1)),
+    };
+  }, [selectedPeriod]);
+
+  // Compute cell rows to write to spreadsheet for each doctor in the selected period.
   const sheetsPayload = useMemo(() => {
-    const year = 2026;
-    const month = 6; // June
-    const totalDays = 30; // June has 30 days
+    const { year, month, totalDays } = periodInfo;
     const payloadMap: { [sheetName: string]: any[][] } = {};
 
     doctors.forEach((doc) => {
@@ -63,16 +74,16 @@ export default function SheetsPanel({
         const currentDateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         
         // Find appointments for morning and afternoon
-        const morningApp = docApps.find((a) => a.date === currentDateStr && a.shift === 'Mañana');
-        const afternoonApp = docApps.find((a) => a.date === currentDateStr && a.shift === 'Tarde');
+        const morningApp = docApps.find((a) => a.date === currentDateStr && String(a.shift) !== 'Tarde');
+        const afternoonApp = docApps.find((a) => a.date === currentDateStr && String(a.shift) === 'Tarde');
 
         // Check 24h Guard shift
         const hasGuard = docGuards.some((s) => s.date === currentDateStr);
 
         // Check for blocks
-        const morningBlock = docBlocks.find((b) => b.date === currentDateStr && (b.shift === 'Mañana' || b.shift === 'Todo el día'));
-        const afternoonBlock = docBlocks.find((b) => b.date === currentDateStr && (b.shift === 'Tarde' || b.shift === 'Todo el día'));
-        const fullBlock = docBlocks.find((b) => b.date === currentDateStr && b.shift === 'Todo el día');
+        const morningBlock = docBlocks.find((b) => b.date === currentDateStr && (String(b.shift) !== 'Tarde'));
+        const afternoonBlock = docBlocks.find((b) => b.date === currentDateStr && (String(b.shift) === 'Tarde' || String(b.shift).toLowerCase().includes('todo')));
+        const fullBlock = docBlocks.find((b) => b.date === currentDateStr && String(b.shift).toLowerCase().includes('todo'));
 
         // 1. Column B: Date string
         const dateCell = currentDateStr;
@@ -134,7 +145,7 @@ export default function SheetsPanel({
         if (fullBlock) {
           observCell = `Bloque Completo: ${fullBlock.reason} - ${fullBlock.notes || ''}`;
         } else if (hasGuard) {
-          observCell = 'Turno Clínico de Urgencia 24 Horas';
+          observCell = 'Turno ClÃ­nico de Urgencia 24 Horas';
         } else if (morningApp?.notes && afternoonApp?.notes) {
           observCell = `AM: ${morningApp.notes}${morningStartInfo} | PM: ${afternoonApp.notes}`;
         } else if (morningApp?.notes) {
@@ -142,9 +153,9 @@ export default function SheetsPanel({
         } else if (afternoonApp?.notes) {
           observCell = `PM: ${afternoonApp.notes}${morningStartInfo ? ` | ${morningStartInfo}` : ''}`;
         } else if (morningStartInfo) {
-          observCell = `Atención regular${morningStartInfo}`;
+          observCell = `AtenciÃ³n regular${morningStartInfo}`;
         } else {
-          observCell = 'Atención programada regular';
+          observCell = 'AtenciÃ³n programada regular';
         }
 
         // Row of values
@@ -162,7 +173,7 @@ export default function SheetsPanel({
     });
 
     return payloadMap;
-  }, [doctors, appointments, blockedDays, shifts24h]);
+  }, [doctors, appointments, blockedDays, shifts24h, selectedPeriod]);
 
   // Execute direct writes using Google Sheets API
   const handleExportToGoogleSheets = () => {
@@ -226,7 +237,7 @@ export default function SheetsPanel({
 
       setExportResult({
         success: true,
-        message: `¡Guardado Exitoso! Se actualizaron correctamente las pestañas de planificación para todos los médicos (NOA, SALAZAR, CARDENAS, ORTEGA, BRINTRUP, MUÑOZ) desde la celda de inicio B${startRow}.`
+        message: `Â¡Guardado Exitoso! Se actualizaron correctamente las pestaÃ±as de planificaciÃ³n para todos los mÃ©dicos (NOA, SALAZAR, CARDENAS, ORTEGA, BRINTRUP, MUÃ‘OZ) desde la celda de inicio B${startRow}.`
       });
     } catch (error: any) {
       console.error('Sheets API Error:', error);
@@ -254,12 +265,12 @@ export default function SheetsPanel({
             <h2 className="text-sm font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wide">
               Exportador Directo a Google Sheets (Preserva Formato)
             </h2>
-            <p className="text-[11px] text-slate-500 font-medium">Actualice de forma directa celdas y filas en las pestañas originales de sus médicos</p>
+            <p className="text-[11px] text-slate-500 font-medium">Actualice de forma directa celdas y filas en las pestaÃ±as originales de sus mÃ©dicos</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5 bg-emerald-100/65 px-3 py-1 rounded-full border border-emerald-250 select-none">
           <span className="w-2 h-2 rounded-full bg-emerald-550 animate-pulse text-emerald-700" />
-          <span className="text-[10px] font-black text-emerald-850 uppercase tracking-wider">Integración Oficial Activa (Google API)</span>
+          <span className="text-[10px] font-black text-emerald-850 uppercase tracking-wider">IntegraciÃ³n Oficial Activa (Google API)</span>
         </div>
       </div>
 
@@ -281,7 +292,7 @@ export default function SheetsPanel({
             />
             {spreadsheetId && (
               <span className="text-[9.5px] font-mono font-bold text-emerald-800 block">
-                ✓ ID Identificado: <span className="underline">{spreadsheetId}</span>
+                âœ“ ID Identificado: <span className="underline">{spreadsheetId}</span>
               </span>
             )}
           </div>
@@ -298,9 +309,9 @@ export default function SheetsPanel({
                 target="_blank"
                 rel="noreferrer"
                 className="text-[9.5px] text-emerald-600 font-black hover:underline tracking-wide bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100"
-                title="Consiga un token rápido en el playground seguro"
+                title="Consiga un token rÃ¡pido en el playground seguro"
               >
-                ¿Cómo Obtener Token? 📋
+                Como Obtener Token
               </a>
             </div>
             
@@ -326,7 +337,7 @@ export default function SheetsPanel({
             </div>
             <div className="flex flex-col justify-end">
               <span className="text-[10px] text-slate-400 font-medium leading-tight">
-                Recomendado: <strong>Fila 8</strong> de sus pestañas (NOA, SALAZAR, etc.) para encajar en el formato de diseño.
+                Recomendado: <strong>Fila 8</strong> de sus pestaÃ±as (NOA, SALAZAR, etc.) para encajar en el formato de diseÃ±o.
               </span>
             </div>
           </div>
@@ -360,12 +371,12 @@ export default function SheetsPanel({
           <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2 text-[11px] text-slate-600">
             <h4 className="font-extrabold text-slate-700 flex items-center gap-1">
               <HelpCircle className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Instrucciones Críticas de Seguridad</span>
+              <span>Instrucciones CrÃ­ticas de Seguridad</span>
             </h4>
             <ul className="list-disc list-inside space-y-1 text-slate-500 font-medium">
-              <li>Asegúrese de compartir el Google Sheet con permiso de <strong>Editor</strong>.</li>
-              <li>Las hojas médicas deben llamarse exactamente: <strong className="text-slate-800">NOA, SALAZAR, CARDENAS, ORTEGA, BRINTRUP, MUÑOZ</strong>.</li>
-              <li>Los colores, gráficos y fórmulas del Sheet se conservarán intactos.</li>
+              <li>AsegÃºrese de compartir el Google Sheet con permiso de <strong>Editor</strong>.</li>
+              <li>Las hojas mÃ©dicas deben llamarse exactamente: <strong className="text-slate-800">NOA, SALAZAR, CARDENAS, ORTEGA, BRINTRUP, MUÃ‘OZ</strong>.</li>
+              <li>Los colores, grÃ¡ficos y fÃ³rmulas del Sheet se conservarÃ¡n intactos.</li>
             </ul>
           </div>
 
@@ -399,7 +410,7 @@ export default function SheetsPanel({
           {/* Virtual Grid Preview */}
           <div className="flex-grow bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-[10.5px] text-slate-300 overflow-x-auto max-h-[360px] overflow-y-auto">
             <div className="border-b border-slate-800 pb-2 mb-2 flex items-center justify-between text-[11px]">
-              <span className="text-emerald-400 font-bold">📋 Datos a escribir en Pestaña: "{previewDoctor?.sheetName || 'N/A'}"</span>
+              <span className="text-emerald-400 font-bold">Datos a escribir en Pestana: "{previewDoctor?.sheetName || 'N/A'}"</span>
               <span className="text-slate-500 font-bold">Rango Estimado: B{startRow} : H{startRow + previewRows.length - 1}</span>
             </div>
 
@@ -407,17 +418,17 @@ export default function SheetsPanel({
               <thead>
                 <tr className="border-b border-slate-800 text-slate-500 font-extrabold uppercase text-[9.5px] select-none">
                   <th className="pb-1 text-center w-8">Fila</th>
-                  <th className="pb-1 px-1.5">📅 Fecha (B)</th>
-                  <th className="pb-1 px-1 text-center">☀️ AM (C/D)</th>
-                  <th className="pb-1 px-1 text-center">🌇 PM (E/F)</th>
-                  <th className="pb-1 px-1 text-center">🛡️ Guardia (G)</th>
-                  <th className="pb-1 px-1.5">📝 Obs (H)</th>
+                  <th className="pb-1 px-1.5">Fecha (B)</th>
+                  <th className="pb-1 px-1 text-center">â˜€ï¸ AM (C/D)</th>
+                  <th className="pb-1 px-1 text-center">PM (E/F)</th>
+                  <th className="pb-1 px-1 text-center">Guardia (G)</th>
+                  <th className="pb-1 px-1.5">Obs (H)</th>
                 </tr>
               </thead>
               <tbody>
                 {previewRows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-slate-500 text-center py-6 italic font-bold">Sin datos para el mes de Junio 2026</td>
+                    <td colSpan={6} className="text-slate-500 text-center py-6 italic font-bold">Sin datos para el mes seleccionado</td>
                   </tr>
                 ) : (
                   previewRows.map((row, idx) => {
@@ -440,7 +451,7 @@ export default function SheetsPanel({
                         }`}
                       >
                         <td className="py-1.5 text-center font-bold text-slate-600 select-none">{rowNum}</td>
-                        <td className="py-1.5 px-1.5 font-bold text-slate-400">{dateVal.slice(8, 10)}-Jun</td>
+                        <td className="py-1.5 px-1.5 font-bold text-slate-400">{dateVal.slice(8, 10)}-{periodInfo.monthLabel}</td>
                         <td className="py-1.5 px-1 text-center font-extrabold text-blue-200">{morningText || <span className="text-slate-700">-</span>}</td>
                         <td className="py-1.5 px-1 text-center font-extrabold text-amber-300">{afternoonText || <span className="text-slate-700">-</span>}</td>
                         <td className="py-1.5 px-1 text-center font-bold">
@@ -480,7 +491,7 @@ export default function SheetsPanel({
             )}
             <div>
               <h5 className="font-extrabold uppercase tracking-wider text-[11px]">
-                {exportResult.success ? 'Sincronización Completada' : 'Atención Requerida'}
+                {exportResult.success ? 'SincronizaciÃ³n Completada' : 'AtenciÃ³n Requerida'}
               </h5>
               <p className="mt-1 font-semibold leading-relaxed">{exportResult.message}</p>
             </div>
@@ -493,7 +504,7 @@ export default function SheetsPanel({
         onClose={() => setShowSheetConfirm(false)}
         onConfirm={executeGoogleSheetsWrite}
         title="Escribir en Google Sheet"
-        message="La aplicación escribirá la rotativa médica automatizada directamente en el Google Sheet original, preservando todo el diseño, colores, fuentes y fórmulas existentes. ¿Desea continuar con la sincronización?"
+        message="La aplicaciÃ³n escribirÃ¡ la rotativa mÃ©dica automatizada directamente en el Google Sheet original, preservando todo el diseÃ±o, colores, fuentes y fÃ³rmulas existentes. Â¿Desea continuar con la sincronizaciÃ³n?"
         confirmText="Sincronizar Sheet"
         cancelText="Volver"
         type="success"
@@ -501,3 +512,4 @@ export default function SheetsPanel({
     </div>
   );
 }
+

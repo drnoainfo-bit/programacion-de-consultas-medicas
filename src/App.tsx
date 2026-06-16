@@ -223,7 +223,11 @@ export default function App() {
 
     for (const guard of newGuards) await upsertShift24h(guard);
 
-    if (appsWithStatus.length > 0) setAppointments(prev => [...prev, ...appsWithStatus]);
+    if (appsWithStatus.length > 0) {
+      setAppointments(prev => [...prev, ...appsWithStatus]);
+      const firstDate = appsWithStatus.sort((a, b) => a.date.localeCompare(b.date))[0]?.date;
+      if (firstDate) setWeekFocusDate(firstDate);
+    }
     if (newGuards.length > 0) setShifts24h(prev => [...prev, ...newGuards]);
   }, [appointments, shifts24h]);
 

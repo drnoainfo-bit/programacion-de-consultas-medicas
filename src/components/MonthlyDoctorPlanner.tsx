@@ -196,18 +196,8 @@ export default function MonthlyDoctorPlanner({
       const hasBlock = doctorBlocks.some((b) => b.date === date && (b.shift === selectedDoctor.defaultShift || b.shift === fullDayShift));
       const hasGuard = doctorGuards.some((g) => g.date === date);
 
-      if (!isWeekend && !holiday && !hasApp && !hasBlock && !hasGuard) {
-        onAddAppointment({
-          doctorId: selectedDoctor.id,
-          date,
-          shift: selectedDoctor.defaultShift,
-          newAdmissions: 2,
-          controls: 3,
-          notes: 'Programado automáticamente (rotativa 6 días)',
-          startTime: selectedDoctor.defaultShift === 'Tarde' ? '14:00' : '09:00',
-          include800: false,
-          include830: false,
-        });
+      if (!hasGuard && !hasBlock) {
+        onToggleShift24h(selectedDoctor.id, date);
         added.push(date);
         onDayActioned?.(date);
       } else {
@@ -222,7 +212,7 @@ export default function MonthlyDoctorPlanner({
         `✅ ${added.length} consulta(s) programada(s).${skipped.length > 0 ? ` ${skipped.length} omitida(s) por fin de semana, feriado o conflicto.` : ''}`
       );
     } else {
-      setMessage('No se encontraron días hábiles disponibles para programar desde ese día.');
+      setMessage('No se encontraron días disponibles para programar guardias desde ese día.');
     }
   };
 

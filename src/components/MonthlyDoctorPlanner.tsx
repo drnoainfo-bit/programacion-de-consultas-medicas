@@ -263,7 +263,7 @@ export default function MonthlyDoctorPlanner({
             ))}
           </select>
 
-          <div className="grid grid-cols-4 gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
+          <div className="grid grid-cols-5 gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
             {modes.map((option) => {
               const Icon = option.icon;
               return (

@@ -372,39 +372,45 @@ export async function exportDoctorsToExcel(
     docBlocks: BlockedDay[],
     docShifts: Shift24h[],
     postTurnoDates: Set<string>,
-    isTarde: boolean
   ): { text: string; bg: string; white: boolean } | null {
     // Turno 24h → todo el día azul oscuro
     if (docShifts.some(s => s.date === dateStr)) {
       return { text: slotIdx === 0 ? 'TURNO 24h' : '', bg: C.TURNO_24H, white: true };
     }
     // Post-turno → sin contenido
-    if (postTurnoDates.has(dateStr)) {
-      return null;
-    }
-    // Bloqueo — respetar turno del bloque vs turno del panel
-    const relevantShift = isTarde ? 'Tarde' : 'Mañana';
+    if (postTurnoDates.has(dateStr)) return null;
+
+    // Determinar el período de este slot según su índice
+    const slotPeriod: 'Mañana' | 'Tarde' = slotIdx < 11 ? 'Mañana' : 'Tarde';
+    const firstSlotOfPeriod = slotPeriod === 'Tarde' ? 11 : 0;
+
+    // Bloqueo — solo bloqueos que correspondan al período de este slot
     const block = docBlocks.find(b =>
       b.date === dateStr &&
-      (b.shift === 'Todo el día' || b.shift === relevantShift)
+      (b.shift === 'Todo el día' || b.shift === slotPeriod)
     );
     if (block) {
       const bg = REASON_BG[block.reason] ?? C.NONE;
       if (block.reason === 'reunion de servicio') {
-        return slotIdx === 1 ? { text: 'REU MED', bg, white: false } : null;
+        return slotIdx === firstSlotOfPeriod + 1 ? { text: 'REU MED', bg, white: false } : null;
       }
-      const label = slotIdx === 0
+      const label = slotIdx === firstSlotOfPeriod
         ? (block.reason === 'Otro'
             ? (block.customReason || 'OTRO').toUpperCase()
             : block.reason.toUpperCase())
         : '';
       return { text: label, bg, white: false };
     }
-    // Consulta
-    const app = docApps.find(a => a.date === dateStr && (a as any).status !== 'Cancelada');
+
+    // Consulta — solo consultas del mismo período que el slot
+    const app = docApps.find(a =>
+      a.date === dateStr &&
+      a.shift === slotPeriod &&
+      (a as any).status !== 'Cancelada'
+    );
     if (app) {
       let startSlot: number;
-      if (isTarde) startSlot = 11;
+      if (slotPeriod === 'Tarde') startSlot = 11;
       else if (app.include800) startSlot = 0;
       else if (app.include830) startSlot = 1;
       else startSlot = 2;
@@ -419,6 +425,7 @@ export async function exportDoctorsToExcel(
         return { text: 'CONTROL', bg: C.POLICLINICO, white: false };
       }
     }
+
     // Feriado nacional
     if (CHILEAN_HOLIDAYS_2026.includes(dateStr)) {
       return { text: slotIdx === 0 ? 'FERIADO' : '', bg: C.FERIADO_BG, white: false };
@@ -469,7 +476,7 @@ export async function exportDoctorsToExcel(
       applyStyle(slotCell, C.NONE, false, 'FF404040', 'left');
 
       week.forEach((ds, di) => {
-        const content = getCellContent(ds, si, docApps, docBlocks, docShifts, postTurnoDates, isTarde);
+        const content = getCellContent(ds, si, docApps, docBlocks, docShifts, postTurnoDates);
         const cell = tRow.getCell(colStart + 1 + di);
         if (content) {
           cell.value = content.text;
@@ -516,7 +523,11 @@ export async function exportDoctorsToExcel(
     const docBlocks = blockedDays.filter(b => b.doctorId === doc.id);
     const docShifts = shifts24h.filter(s => s.doctorId === doc.id);
     const isTarde   = doc.defaultShift === 'Tarde';
-    const slotRange = isTarde ? { start: 11, end: 17 } : { start: 0, end: 11 };
+    const slotRange = doc.morningSala
+      ? { start: 0, end: 17 }          // día completo: mañana (sala) + tarde (consulta)
+      : isTarde
+        ? { start: 11, end: 17 }
+        : { start: 0, end: 11 };
     const slotsCount = slotRange.end - slotRange.start;
 
     const postTurnoDates = new Set<string>();

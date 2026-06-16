@@ -211,7 +211,7 @@ export default function App() {
     }
   }, [appointments, shifts24h, selectedPeriod]);
 
-  const handleAutoSchedule = useCallback(async (generatedApps: Appointment[], generatedGuards: Shift24h[] = []) => {
+  const handleAutoSchedule = useCallback(async (generatedApps: Appointment[], generatedGuards: Shift24h[] = [], generatedBlocks: BlockedDay[] = []) => {
     const existingAppKeys = new Set(appointments.map(a => `${a.doctorId}-${a.date}-${a.shift}`));
     const newApps = generatedApps.filter(a => !existingAppKeys.has(`${a.doctorId}-${a.date}-${a.shift}`));
     const appsWithStatus = newApps.map((a: Appointment) => ({ ...a, status: 'Programada' }));
@@ -220,8 +220,11 @@ export default function App() {
 
     const existingGuardKeys = new Set(shifts24h.map(s => `${s.doctorId}-${s.date}`));
     const newGuards = generatedGuards.filter(g => !existingGuardKeys.has(`${g.doctorId}-${g.date}`));
-
     for (const guard of newGuards) await upsertShift24h(guard);
+
+    const existingBlockKeys = new Set(blockedDays.map(b => `${b.doctorId}-${b.date}-${b.shift}`));
+    const newBlocks = generatedBlocks.filter(b => !existingBlockKeys.has(`${b.doctorId}-${b.date}-${b.shift}`));
+    for (const block of newBlocks) await upsertBlockedDay(block);
 
     if (appsWithStatus.length > 0) {
       setAppointments(prev => [...prev, ...appsWithStatus]);
@@ -229,7 +232,8 @@ export default function App() {
       if (firstDate) setWeekFocusDate(firstDate);
     }
     if (newGuards.length > 0) setShifts24h(prev => [...prev, ...newGuards]);
-  }, [appointments, shifts24h]);
+    if (newBlocks.length > 0) setBlockedDays(prev => [...prev, ...newBlocks]);
+  }, [appointments, shifts24h, blockedDays]);
 
   const handleDownloadExcel = async () => {
     await exportDoctorsToExcel(doctors, appointments, blockedDays, shifts24h, selectedPeriod);

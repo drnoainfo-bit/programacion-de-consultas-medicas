@@ -11,7 +11,7 @@ interface ValidationPanelProps {
   blockedDays: BlockedDay[];
   shifts24h: Shift24h[];
   selectedPeriod: string; // YYYY-MM format, e.g. "2026-06"
-  onAutoSchedule: (generatedApps: Appointment[], generatedGuards?: Shift24h[]) => void;
+  onAutoSchedule: (generatedApps: Appointment[], generatedGuards?: Shift24h[], generatedBlocks?: BlockedDay[]) => void;
   onClearAppointments: () => void | Promise<void>;
 }
 
@@ -283,6 +283,7 @@ export default function ValidationPanel({
   // Programa consultas en todos los días disponibles según el estado real registrado
   const handleAutoGenerateSchedules = () => {
     const generatedApps: Appointment[] = [];
+    const generatedBlocks: BlockedDay[] = [];
 
     const [yearStr, monthStr] = selectedPeriod.split('-');
     const year = parseInt(yearStr, 10) || new Date().getFullYear();
@@ -343,10 +344,29 @@ export default function ValidationPanel({
           include800: false,
           include830: false,
         });
+
+        // Sala en mañana para médicos con morningSala activo
+        if (doc.morningSala) {
+          const alreadyHasMorningSala = blockedDays.some(
+            b => b.doctorId === doc.id && b.date === dateStr && b.shift === 'Mañana' && b.reason === 'sala'
+          );
+          if (!alreadyHasMorningSala) {
+            generatedBlocks.push({
+              id: `auto-sala-${doc.id}-${dateStr}`,
+              doctorId: doc.id,
+              date: dateStr,
+              shift: 'Mañana',
+              reason: 'sala',
+              notes: 'Sala generada automáticamente',
+              startTime: '08:00',
+              endTime: '14:00',
+            });
+          }
+        }
       }
     });
 
-    onAutoSchedule(generatedApps, shifts24h);
+    onAutoSchedule(generatedApps, shifts24h, generatedBlocks);
   };
 
   const errors = violations.filter(v => v.type === 'error');

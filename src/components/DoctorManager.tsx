@@ -252,6 +252,20 @@ export default function DoctorManager({
                     {doc.defaultShift === 'Tarde' ? 'Tarde (L-V)' : 'Mañana (L-V)'}
                   </span>
                 </div>
+                <div className="flex justify-between items-center">
+                  <span>Sala en mañana:</span>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateDoctor(doc.id, { morningSala: !doc.morningSala })}
+                    className={`px-2 py-0.5 text-[10px] font-bold rounded-md border transition-colors ${
+                      doc.morningSala
+                        ? 'bg-green-50 text-green-700 border-green-300'
+                        : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {doc.morningSala ? 'Sí' : 'No'}
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-slate-50">

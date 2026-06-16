@@ -14,6 +14,7 @@ export interface Doctor {
   isActive: boolean;
   sheetName: string;   // Sheet corresponding key (e.g., 'NOA', 'SALAZAR', etc.)
   maxWeeklyPatients?: number; // Quota tracker
+  morningSala?: boolean; // Doctors who do sala in the mornings (e.g. Bimtrup, Muñoz)
 }
 
 export type BlockReason =

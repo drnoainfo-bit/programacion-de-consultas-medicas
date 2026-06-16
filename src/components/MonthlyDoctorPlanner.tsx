@@ -159,8 +159,7 @@ export default function MonthlyDoctorPlanner({
     }
 
     if (mode === 'auto') {
-      setAutoStartDay(day);
-      setMessage(`Día de inicio seleccionado: ${date}. Pulsa "Programar rotativa" para automatizar.`);
+      handleAutoScheduleFrom(day);
       return;
     }
 
@@ -181,13 +180,13 @@ export default function MonthlyDoctorPlanner({
     setMessage('No hay consulta ni bloqueo para editar en ese dia.');
   };
 
-  const handleAutoSchedule = () => {
-    if (!selectedDoctor || autoStartDay === null) return;
+  const handleAutoScheduleFrom = (startDay: number) => {
+    if (!selectedDoctor) return;
     const daysInMonth = new Date(year, month, 0).getDate();
     const added: string[] = [];
     const skipped: string[] = [];
 
-    let day = autoStartDay;
+    let day = startDay;
     while (day <= daysInMonth) {
       const date = formatDate(year, month, day);
       const dayDate = new Date(year, month - 1, day, 12, 0, 0);
@@ -223,7 +222,7 @@ export default function MonthlyDoctorPlanner({
         `✅ ${added.length} consulta(s) programada(s).${skipped.length > 0 ? ` ${skipped.length} omitida(s) por fin de semana, feriado o conflicto.` : ''}`
       );
     } else {
-      setMessage('No se encontraron días hábiles disponibles para programar desde ese inicio.');
+      setMessage('No se encontraron días hábiles disponibles para programar desde ese día.');
     }
   };
 
@@ -306,18 +305,12 @@ export default function MonthlyDoctorPlanner({
             const block = doctorBlocks.find((item) => item.date === date);
             const guard = doctorGuards.find((item) => item.date === date);
 
-            const isAutoStart = mode === 'auto' && autoStartDay === day;
-            // days in auto preview: same pattern every 6 days from autoStartDay
-            const isAutoPreview = mode === 'auto' && autoStartDay !== null && day > autoStartDay && (day - autoStartDay) % 6 === 0;
-
             let statusClass = 'bg-white border-slate-200 hover:border-blue-400';
             if (isHoliday && !block && !guard) statusClass = 'bg-red-50 border-red-200 text-red-950';
             if (appointment) statusClass = 'bg-blue-50 border-blue-200 text-blue-950';
             if (block) statusClass = 'bg-rose-50 border-rose-200 text-rose-950';
             if (guard) statusClass = 'bg-[#CC00FF] border-[#9900CC] text-white';
             if (isWeekend && !guard) statusClass = 'bg-slate-50 border-slate-200 text-slate-400';
-            if (isAutoStart) statusClass = 'bg-amber-400 border-amber-600 text-white ring-2 ring-amber-500';
-            if (isAutoPreview && !isWeekend && !isHoliday && !block && !guard && !appointment) statusClass = 'bg-amber-100 border-amber-400 text-amber-900';
 
             return (
               <button
@@ -336,9 +329,7 @@ export default function MonthlyDoctorPlanner({
                   {block && <div className="text-rose-700">Bloqueado</div>}
                   {appointment && <div className="text-blue-700">{appointment.newAdmissions}+{appointment.controls}</div>}
                   {isHoliday && !guard && !block && !appointment && <div className="text-red-600">Feriado</div>}
-                  {isAutoStart && <div className="text-white">Inicio</div>}
-                  {isAutoPreview && !isWeekend && !isHoliday && !block && !guard && !appointment && <div className="text-amber-700">Rotativa</div>}
-                  {!guard && !block && !appointment && !isWeekend && !isHoliday && !isAutoStart && !isAutoPreview && <div className="text-emerald-700">Libre</div>}
+                  {!guard && !block && !appointment && !isWeekend && !isHoliday && <div className="text-emerald-700">Libre</div>}
                 </div>
               </button>
             );
@@ -387,35 +378,8 @@ export default function MonthlyDoctorPlanner({
         )}
 
         {mode === 'auto' && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex-1 text-[11px] text-amber-800">
-              <p className="font-black mb-0.5">Modo Rotativa automática</p>
-              <p className="font-medium">
-                {autoStartDay === null
-                  ? 'Haz clic en el primer día del turno del médico. Se marcarán en amarillo los días siguientes cada 6 días.'
-                  : `Inicio: día ${autoStartDay} del mes. Los días marcados en amarillo se programarán al confirmar.`}
-              </p>
-            </div>
-            <div className="flex gap-2">
-              {autoStartDay !== null && (
-                <button
-                  type="button"
-                  onClick={() => { setAutoStartDay(null); setMessage(''); }}
-                  className="px-3 py-2 text-xs font-bold rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 transition-all"
-                >
-                  Limpiar
-                </button>
-              )}
-              <button
-                type="button"
-                disabled={autoStartDay === null}
-                onClick={handleAutoSchedule}
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-black rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
-              >
-                <Zap className="w-3.5 h-3.5" />
-                Programar rotativa
-              </button>
-            </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800 font-medium">
+            <span className="font-black">Modo Rotativa:</span> haz clic en el primer día del turno — se programan consultas cada 6 días automáticamente desde ese día.
           </div>
         )}
 
@@ -425,12 +389,6 @@ export default function MonthlyDoctorPlanner({
             <span className="px-2 py-1 rounded bg-rose-50 text-rose-700 border border-rose-100">Bloqueado</span>
             <span className="px-2 py-1 rounded bg-[#CC00FF] text-white border border-[#9900CC]">Guardia</span>
             <span className="px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200">🏖️ Feriado</span>
-            {mode === 'auto' && (
-              <>
-                <span className="px-2 py-1 rounded bg-amber-400 text-white border border-amber-600">Inicio rotativa</span>
-                <span className="px-2 py-1 rounded bg-amber-100 text-amber-900 border border-amber-400">Día rotativa</span>
-              </>
-            )}
           </div>
           {message && <span className="text-slate-600 font-semibold">{message}</span>}
         </div>

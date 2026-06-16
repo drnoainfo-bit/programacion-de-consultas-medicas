@@ -6,6 +6,29 @@
 import ExcelJS from 'exceljs';
 import { Doctor, Appointment, BlockedDay, Shift24h } from './types';
 
+export const CHILEAN_HOLIDAYS_2026: string[] = [
+  '2026-01-01',
+  '2026-04-03',
+  '2026-04-04',
+  '2026-05-01',
+  '2026-05-21',
+  '2026-06-21',
+  '2026-06-29',
+  '2026-07-16',
+  '2026-08-15',
+  '2026-09-18',
+  '2026-09-19',
+  '2026-10-12',
+  '2026-10-27',
+  '2026-11-01',
+  '2026-12-08',
+  '2026-12-25',
+];
+
+export function isChileanHoliday(dateStr: string): boolean {
+  return CHILEAN_HOLIDAYS_2026.includes(dateStr);
+}
+
 // Helper to get week dates based on a reference date
 export function getWeekDates(refDate: Date): Date[] {
   const currentDay = refDate.getDay(); // 0 is Sunday, 1 is Monday ... 6 is Saturday
@@ -36,10 +59,10 @@ export function formatReadableDate(dateStr: string): string {
   if (!dateStr) return '';
   const parts = dateStr.split('-');
   if (parts.length !== 3) return dateStr;
-  
+
   // Use Date.UTC to avoid local timezone offset shifts
   const date = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
-  
+
   const formatter = new Intl.DateTimeFormat('es-CL', {
     weekday: 'long',
     day: 'numeric',
@@ -47,7 +70,7 @@ export function formatReadableDate(dateStr: string): string {
     year: 'numeric',
     timeZone: 'UTC'
   });
-  
+
   // Capitalize first letter
   const formatted = formatter.format(date);
   return formatted.charAt(0).toUpperCase() + formatted.slice(1);
@@ -66,6 +89,12 @@ export function getBlockingForSlot(
       b.date === dateStr &&
       (b.shift === shift || b.shift === 'Todo el día')
   );
+}
+
+// Parse a YYYY-MM-DD string as local noon to avoid UTC day-shift bugs
+export function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0);
 }
 
 // Pre-configured doctors
@@ -215,11 +244,6 @@ export const INITIAL_APPOINTMENTS: Appointment[] = [
   }
 ];
 
-/**
- * EXPORT TO EXCEL — Visual weekly grid matching Google Sheet structure.
- * One sheet per doctor, weeks arranged Mon–Fri with 30-min time slots,
- * color-coded by content type (ingresos, controles, blocks, shifts24h).
- */
 export async function exportDoctorsToExcel(
   doctors: Doctor[],
   appointments: Appointment[],
@@ -227,28 +251,26 @@ export async function exportDoctorsToExcel(
   shifts24h: Shift24h[] = [],
   period = '2026-06'
 ): Promise<void> {
-  // ── Color palette (ARGB — ExcelJS format) ───────────────────────────────
+  // ── Colors (ARGB) ────────────────────────────────────────────────────────
   const C = {
+    UPC:          'FFCC00FF',
+    POLICLINICO:  'FFFFFF00',
+    SALA:         'FF70AD47',
+    PROT:         'FFFF0000',
+    ADM:          'FFC55A11',
+    FERIADO_BG:   '00000000',  // transparent — sin relleno
+    PERMISO:      'FF4472C4',
+    REU_MED:      'FF00B0F0',
+    LIBRE:        'FF00FF00',
+    LICENCIA:     'FF666666',
+    CAPACITACION: 'FFFF00FF',
     INGRESOS:     'FFB8D7F5',
     CONTROLES:    'FFC6EFCE',
-    TURNO_24H:    'FF4472C4',
+    TURNO_24H:    'FF1F3864',
     POST_TURNO:   'FF9DC3E6',
-    REU_MED:      'FFFFC000',
-    UPC:          'FFFF9999',
-    POLICLINICO:  'FFFFCC99',
-    SALA:         'FFFFB3B3',
-    FERIADO:      'FFFF6666',
-    PERMISO:      'FFFFFF99',
-    LIBRE:        'FFFFF2CC',
-    LICENCIA:     'FFFCE4D6',
-    CAPACITACION: 'FFEAD1DC',
-    PROT:         'FFD9D9D9',
-    ADM:          'FFFFE699',
-    OTRO:         'FFEDEDED',
-    HEADER:       'FF1F3864',
-    SUBHEADER:    'FF2E75B6',
-    DATE_ROW:     'FFD6E4F0',
-    TURNO_COL:    'FFBDD7EE',
+    HEADER_DAY:   'FFDEEAF6',
+    DATE_ROW:     'FFFEF2CB',
+    DOC_HEADER:   'FF1F3864',
     WHITE:        'FFFFFFFF',
     NONE:         '00000000',
   };
@@ -259,16 +281,15 @@ export async function exportDoctorsToExcel(
     'sala':                              C.SALA,
     'horario protegido':                 C.PROT,
     'Actividades adm':                   C.ADM,
-    'feriado':                           C.FERIADO,
+    'feriado':                           C.FERIADO_BG,
     'permiso adm/feriado legal':         C.PERMISO,
     'reunion de servicio':               C.REU_MED,
     'libre 22x28':                       C.LIBRE,
     'licencia':                          C.LICENCIA,
     'capacitacion/comision de servicio': C.CAPACITACION,
-    'Otro':                              C.OTRO,
+    'Otro':                              C.NONE,
   };
 
-  // Franjas completas: índices 0-10 mañana, 11-16 tarde
   const ALL_TIME_SLOTS = [
     '08:00 - 08:30', '08:30 - 09:00', '09:00 - 09:30', '09:30 - 10:00',  // 0-3
     '10:00 - 10:30', '10:30 - 11:00', '11:00 - 11:30', '11:30 - 12:00',  // 4-7
@@ -279,23 +300,24 @@ export async function exportDoctorsToExcel(
 
   const DAY_LABELS = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES'];
 
+  // Solo los 11 conceptos de la leyenda oficial — sin INGRESOS, CONTROLES, TURNO 24h, POST TURNO
   const LEGEND_ITEMS: [string, string][] = [
     ['UPC',                               C.UPC],
     ['policlinico',                       C.POLICLINICO],
     ['sala',                              C.SALA],
     ['horario protegido',                 C.PROT],
     ['Actividades adm',                   C.ADM],
-    ['feriado',                           C.FERIADO],
+    ['feriado',                           C.FERIADO_BG],
     ['permiso adm/feriado legal',         C.PERMISO],
     ['reunion de servicio',               C.REU_MED],
     ['libre 22x28',                       C.LIBRE],
     ['licencia',                          C.LICENCIA],
     ['capacitacion/comision de servicio', C.CAPACITACION],
-    ['INGRESOS nuevos',                   C.INGRESOS],
-    ['CONTROLES',                         C.CONTROLES],
-    ['TURNO 24h',                         C.TURNO_24H],
-    ['POST TURNO',                        C.POST_TURNO],
   ];
+
+  // Layout: 3 weeks top (cols 1,8,15), 2 weeks bottom (cols 1,8), legend col 22
+  const WEEK_COL_STARTS = [1, 8, 15];
+  const LEGEND_COL = 22;
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   function getWeeks(p: string): string[][] {
@@ -330,7 +352,7 @@ export async function exportDoctorsToExcel(
     fc: string,
     halign: ExcelJS.Alignment['horizontal'] = 'center'
   ) {
-    if (bg && bg !== C.NONE) {
+    if (bg && bg !== C.NONE && bg !== C.FERIADO_BG) {
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
     }
     cell.font = { bold, color: { argb: fc }, size: 9, name: 'Calibri' };
@@ -343,7 +365,7 @@ export async function exportDoctorsToExcel(
     };
   }
 
-  function resolveSlot(
+  function getCellContent(
     dateStr: string,
     slotIdx: number,
     docApps: (Appointment & { status?: string })[],
@@ -352,25 +374,25 @@ export async function exportDoctorsToExcel(
     postTurnoDates: Set<string>,
     isTarde: boolean
   ): { text: string; bg: string; white: boolean } | null {
-    // Turno 24h → bloquear todos los slots del día
+    // Turno 24h → todo el día azul oscuro
     if (docShifts.some(s => s.date === dateStr)) {
       return { text: slotIdx === 0 ? 'TURNO 24h' : '', bg: C.TURNO_24H, white: true };
     }
-
-    // Post-turno → dejar en blanco (el médico hace otras actividades asignadas desde el sistema)
+    // Post-turno → sin contenido
     if (postTurnoDates.has(dateStr)) {
       return null;
     }
-
-    // Día bloqueado → mostrar motivo en slot 0, color en todos los slots
-    const block = docBlocks.find(b => b.date === dateStr);
+    // Bloqueo — respetar turno del bloque vs turno del panel
+    const relevantShift = isTarde ? 'Tarde' : 'Mañana';
+    const block = docBlocks.find(b =>
+      b.date === dateStr &&
+      (b.shift === 'Todo el día' || b.shift === relevantShift)
+    );
     if (block) {
-      const bg = REASON_BG[block.reason] || C.OTRO;
+      const bg = REASON_BG[block.reason] ?? C.NONE;
       if (block.reason === 'reunion de servicio') {
-        // Solo 1 slot para reunión (no bloquea todo el día)
         return slotIdx === 1 ? { text: 'REU MED', bg, white: false } : null;
       }
-      // Motivo en slot 0, resto del día con mismo color
       const label = slotIdx === 0
         ? (block.reason === 'Otro'
             ? (block.customReason || 'OTRO').toUpperCase()
@@ -378,13 +400,9 @@ export async function exportDoctorsToExcel(
         : '';
       return { text: label, bg, white: false };
     }
-
-    // Consulta → cada ingreso/control ocupa su propia franja de 30 min
+    // Consulta
     const app = docApps.find(a => a.date === dateStr && (a as any).status !== 'Cancelada');
     if (app) {
-      // Slot de inicio (índice absoluto en ALL_TIME_SLOTS):
-      // mañana: 09:00 (idx 2); tarde: 14:00 (idx 11)
-      // include800/include830 solo aplican a turno mañana
       let startSlot: number;
       if (isTarde) startSlot = 11;
       else if (app.include800) startSlot = 0;
@@ -395,34 +413,111 @@ export async function exportDoctorsToExcel(
       const controlesEnd = ingresosEnd + (app.controls || 0);
 
       if (slotIdx >= startSlot && slotIdx < ingresosEnd) {
-        return { text: 'INGRESO', bg: C.INGRESOS, white: false };
+        return { text: 'INGRESO', bg: C.POLICLINICO, white: false };
       }
       if (slotIdx >= ingresosEnd && slotIdx < controlesEnd) {
-        return { text: 'CONTROL', bg: C.CONTROLES, white: false };
+        return { text: 'CONTROL', bg: C.POLICLINICO, white: false };
       }
     }
-
+    // Feriado nacional
+    if (CHILEAN_HOLIDAYS_2026.includes(dateStr)) {
+      return { text: slotIdx === 0 ? 'FERIADO' : '', bg: C.FERIADO_BG, white: false };
+    }
     return null;
   }
 
-  // ── Build workbook with ExcelJS ──────────────────────────────────────────
-  const wb = new ExcelJS.Workbook();
-  const weeks = getWeeks(period);
+  function writeWeekPanel(
+    ws: ExcelJS.Worksheet,
+    week: string[],
+    colStart: number,
+    startRow: number,
+    slotRange: { start: number; end: number },
+    docApps: (Appointment & { status?: string })[],
+    docBlocks: BlockedDay[],
+    docShifts: Shift24h[],
+    postTurnoDates: Set<string>,
+    isTarde: boolean,
+    lateralCol: number  // columna separadora para anotar turnos de fin de semana
+  ) {
+    // Day header row
+    const hRow = ws.getRow(startRow);
+    hRow.height = 18;
+    applyStyle(hRow.getCell(colStart), C.HEADER_DAY, true, 'FF1A1A1A');
+    hRow.getCell(colStart).value = 'HORARIO';
+    DAY_LABELS.forEach((d, i) => {
+      const cell = hRow.getCell(colStart + 1 + i);
+      cell.value = d;
+      applyStyle(cell, C.HEADER_DAY, true, 'FF1A1A1A');
+    });
 
-  // Group: first week alone, then pairs
-  const weekGroups: string[][][] = [];
-  if (weeks.length > 0) weekGroups.push([weeks[0]]);
-  for (let i = 1; i < weeks.length; i += 2) {
-    weekGroups.push(i + 1 < weeks.length ? [weeks[i], weeks[i + 1]] : [weeks[i]]);
+    // Date row
+    const dRow = ws.getRow(startRow + 1);
+    dRow.height = 16;
+    applyStyle(dRow.getCell(colStart), C.DATE_ROW, false, 'FF111111');
+    week.forEach((ds, i) => {
+      const cell = dRow.getCell(colStart + 1 + i);
+      cell.value = fmtDate(ds);
+      applyStyle(cell, C.DATE_ROW, true, 'FF111111');
+    });
+
+    // Time slots
+    for (let si = slotRange.start; si < slotRange.end; si++) {
+      const tRow = ws.getRow(startRow + 2 + (si - slotRange.start));
+      tRow.height = 18;
+      const slotCell = tRow.getCell(colStart);
+      slotCell.value = ALL_TIME_SLOTS[si];
+      applyStyle(slotCell, C.NONE, false, 'FF404040', 'left');
+
+      week.forEach((ds, di) => {
+        const content = getCellContent(ds, si, docApps, docBlocks, docShifts, postTurnoDates, isTarde);
+        const cell = tRow.getCell(colStart + 1 + di);
+        if (content) {
+          cell.value = content.text;
+          applyStyle(cell, content.bg, true, content.white ? C.WHITE : 'FF1A1A1A');
+        } else {
+          applyStyle(cell, C.NONE, false, 'FF111111');
+        }
+      });
+    }
+
+    // Turnos de fin de semana → anotación lateral en columna separadora
+    // El sábado sigue al viernes (week[4])
+    const [fy, fm, fd] = week[4].split('-').map(Number);
+    const satStr = formatDateString(new Date(fy, fm - 1, fd + 1));
+    const sunStr = formatDateString(new Date(fy, fm - 1, fd + 2));
+    const hasSat = docShifts.some(s => s.date === satStr);
+    const hasSun = docShifts.some(s => s.date === sunStr);
+
+    if (hasSat || hasSun) {
+      const labels = hasSat && hasSun
+        ? ['TURNO', 'SABADO', 'TURNO', 'DOMINGO']
+        : hasSat
+          ? ['TURNO', 'SABADO']
+          : ['TURNO', 'DOMINGO'];
+
+      labels.forEach((txt, i) => {
+        const row = ws.getRow(startRow + 2 + i);
+        row.height = 18;
+        const cell = row.getCell(lateralCol);
+        cell.value = txt;
+        applyStyle(cell, C.UPC, true, C.WHITE);
+      });
+    }
   }
 
+  // ── Build workbook ───────────────────────────────────────────────────────
+  const wb = new ExcelJS.Workbook();
+  const weeks = getWeeks(period);
+  const topWeeks = weeks.slice(0, 3);
+  const bottomWeeks = weeks.slice(3, 5);
+
   for (const doc of doctors) {
-    const docApps   = appointments.filter(a => a.doctorId === doc.id);
+    const docApps   = appointments.filter(a => a.doctorId === doc.id) as (Appointment & { status?: string })[];
     const docBlocks = blockedDays.filter(b => b.doctorId === doc.id);
     const docShifts = shifts24h.filter(s => s.doctorId === doc.id);
     const isTarde   = doc.defaultShift === 'Tarde';
-    // Rango de franjas horarias según turno
     const slotRange = isTarde ? { start: 11, end: 17 } : { start: 0, end: 11 };
+    const slotsCount = slotRange.end - slotRange.start;
 
     const postTurnoDates = new Set<string>();
     docShifts.forEach(s => {
@@ -430,172 +525,65 @@ export async function exportDoctorsToExcel(
       postTurnoDates.add(formatDateString(new Date(y, mo - 1, d + 1)));
     });
 
-    const sheetName = doc.sheetName.replace(/[\[\]\*\\\?\:\/]/g, '').slice(0, 30) || `Doc_${doc.id}`;
+    const sheetName = doc.sheetName.replace(/[\[\]*\\?:/]/g, '').slice(0, 30) || `Doc_${doc.id}`;
     const ws = wb.addWorksheet(sheetName);
 
-    // Column widths (13 cols: HORARIO + 5days + TURNO + HORARIO + 5days)
+    // Col widths: week1(1-6) | sep/turno-fds(7) | week2(8-13) | sep/turno-fds(14) | week3(15-20) | sep/turno-fds(21) | legend(22-23)
     ws.columns = [
-      { width: 16 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 },
-      { width: 8 },
-      { width: 16 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 },
-      { width: 3 },
-      { width: 22 }, { width: 22 }, { width: 22 },
+      { width: 16 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, // 1-6
+      { width: 10 },                                                                           // 7 — turno fds semana 1
+      { width: 16 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, // 8-13
+      { width: 10 },                                                                           // 14 — turno fds semana 2
+      { width: 16 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, // 15-20
+      { width: 10 },                                                                           // 21 — turno fds semana 3
+      { width: 5  }, { width: 26 },                                                           // 22-23 (legend)
     ];
 
-    let rowNum = 1; // ExcelJS is 1-indexed
+    // Row 1: doctor name merged cols 1-20
+    ws.getRow(1).height = 22;
+    const hc = ws.getRow(1).getCell(1);
+    hc.value = doc.sheetName;
+    applyStyle(hc, C.DOC_HEADER, true, C.WHITE);
+    ws.mergeCells(1, 1, 1, 20);
 
-    // Doctor name header
-    const headerRow = ws.getRow(rowNum);
-    headerRow.height = 22;
-    const headerCell = headerRow.getCell(1);
-    headerCell.value = doc.sheetName;
-    applyStyle(headerCell, C.HEADER, true, C.WHITE);
-    ws.mergeCells(rowNum, 1, rowNum, 13);
-    rowNum++;
+    // Top section: weeks 0,1,2 — all start at row 2
+    // Lateral cols (separadores): 7, 14, 21 para semanas 0,1,2
+    const TOP_LATERAL_COLS = [7, 14, 21];
+    const topStartRow = 2;
+    topWeeks.forEach((week, wi) => {
+      writeWeekPanel(ws, week, WEEK_COL_STARTS[wi], topStartRow, slotRange, docApps, docBlocks, docShifts, postTurnoDates, isTarde, TOP_LATERAL_COLS[wi]);
+    });
 
-    let firstWeekStartRow = -1;
+    // Legend in cols 22-23, starting at row 2
+    let lr = topStartRow;
+    const legHCell = ws.getRow(lr).getCell(LEGEND_COL);
+    legHCell.value = 'LEYENDA';
+    ws.getRow(lr).height = 18;
+    applyStyle(legHCell, C.DOC_HEADER, true, C.WHITE);
+    ws.mergeCells(lr, LEGEND_COL, lr, LEGEND_COL + 1);
+    lr++;
 
-    for (let gi = 0; gi < weekGroups.length; gi++) {
-      if (gi > 0) { rowNum++; } // blank gap between week groups
-
-      const group = weekGroups[gi];
-      if (gi === 0) firstWeekStartRow = rowNum;
-      const isPair = group.length === 2;
-
-      if (!isPair) {
-        const week = group[0];
-
-        // Column headers
-        const hRow = ws.getRow(rowNum);
-        hRow.height = 18;
-        const hLabel = hRow.getCell(1);
-        hLabel.value = 'HORARIO';
-        applyStyle(hLabel, C.SUBHEADER, true, C.WHITE);
-        DAY_LABELS.forEach((d, i) => {
-          const c = hRow.getCell(i + 2);
-          c.value = d;
-          applyStyle(c, C.SUBHEADER, true, C.WHITE);
-        });
-        rowNum++;
-
-        // Date row
-        const dRow = ws.getRow(rowNum);
-        dRow.height = 16;
-        applyStyle(dRow.getCell(1), C.DATE_ROW, false, 'FF111111');
-        week.forEach((ds, i) => {
-          const c = dRow.getCell(i + 2);
-          c.value = fmtDate(ds);
-          applyStyle(c, C.DATE_ROW, true, 'FF111111');
-        });
-        rowNum++;
-
-        // Time slots (solo el rango del turno del médico)
-        for (let si = slotRange.start; si < slotRange.end; si++) {
-          const tRow = ws.getRow(rowNum);
-          tRow.height = 18;
-          const slotCell = tRow.getCell(1);
-          slotCell.value = ALL_TIME_SLOTS[si];
-          applyStyle(slotCell, C.NONE, false, 'FF404040', 'left');
-
-          week.forEach((ds, di) => {
-            const r = resolveSlot(ds, si, docApps, docBlocks, docShifts, postTurnoDates, isTarde);
-            const c = tRow.getCell(di + 2);
-            if (r) {
-              c.value = r.text;
-              applyStyle(c, r.bg, true, r.white ? C.WHITE : 'FF1A1A1A');
-            } else {
-              applyStyle(c, C.NONE, false, 'FF111111');
-            }
-          });
-          rowNum++;
-        }
-
-      } else {
-        const [weekA, weekB] = group;
-
-        // Weekend turno detection
-        const satAfterA = new Date(...(weekA[4].split('-').map(Number) as [number, number, number]));
-        satAfterA.setDate(satAfterA.getDate() + 1);
-        const satStr = formatDateString(satAfterA);
-        const sunStr = formatDateString(new Date(satAfterA.getTime() + 86400000));
-        const hasSun = docShifts.some(s => s.date === sunStr);
-        const hasSat = docShifts.some(s => s.date === satStr);
-        const turnoLabel = hasSun ? ['TURNO', 'DOMINGO'] : hasSat ? ['TURNO', 'SABADO'] : [];
-
-        // Column headers for both weeks
-        const hRow = ws.getRow(rowNum);
-        hRow.height = 18;
-        const hL = hRow.getCell(1); hL.value = 'HORARIO'; applyStyle(hL, C.SUBHEADER, true, C.WHITE);
-        DAY_LABELS.forEach((d, i) => { const c = hRow.getCell(i + 2); c.value = d; applyStyle(c, C.SUBHEADER, true, C.WHITE); });
-        applyStyle(hRow.getCell(7), C.TURNO_COL, false, 'FF111111');
-        const hR = hRow.getCell(8); hR.value = 'HORARIO'; applyStyle(hR, C.SUBHEADER, true, C.WHITE);
-        DAY_LABELS.forEach((d, i) => { const c = hRow.getCell(i + 9); c.value = d; applyStyle(c, C.SUBHEADER, true, C.WHITE); });
-        rowNum++;
-
-        // Date rows for both weeks
-        const dRow = ws.getRow(rowNum);
-        dRow.height = 16;
-        applyStyle(dRow.getCell(1), C.DATE_ROW, false, 'FF111111');
-        weekA.forEach((ds, i) => { const c = dRow.getCell(i + 2); c.value = fmtDate(ds); applyStyle(c, C.DATE_ROW, true, 'FF111111'); });
-        applyStyle(dRow.getCell(7), C.TURNO_COL, false, 'FF111111');
-        applyStyle(dRow.getCell(8), C.DATE_ROW, false, 'FF111111');
-        weekB.forEach((ds, i) => { const c = dRow.getCell(i + 9); c.value = fmtDate(ds); applyStyle(c, C.DATE_ROW, true, 'FF111111'); });
-        rowNum++;
-
-        // Time slots for both weeks (solo el rango del turno del médico)
-        for (let si = slotRange.start; si < slotRange.end; si++) {
-          const tRow = ws.getRow(rowNum);
-          tRow.height = 18;
-          const relSi = si - slotRange.start; // índice relativo para turnoLabel
-
-          // Left time label
-          const sL = tRow.getCell(1); sL.value = ALL_TIME_SLOTS[si]; applyStyle(sL, C.NONE, false, 'FF404040', 'left');
-          weekA.forEach((ds, di) => {
-            const r = resolveSlot(ds, si, docApps, docBlocks, docShifts, postTurnoDates, isTarde);
-            const c = tRow.getCell(di + 2);
-            if (r) { c.value = r.text; applyStyle(c, r.bg, true, r.white ? C.WHITE : 'FF1A1A1A'); }
-            else { applyStyle(c, C.NONE, false, 'FF111111'); }
-          });
-
-          // TURNO separator
-          const tText = turnoLabel[relSi] || '';
-          const tCol = tRow.getCell(7);
-          if (tText) { tCol.value = tText; applyStyle(tCol, C.TURNO_24H, true, C.WHITE); }
-          else { applyStyle(tCol, C.TURNO_COL, false, 'FF111111'); }
-
-          // Right time label
-          const sR = tRow.getCell(8); sR.value = ALL_TIME_SLOTS[si]; applyStyle(sR, C.NONE, false, 'FF404040', 'left');
-          weekB.forEach((ds, di) => {
-            const r = resolveSlot(ds, si, docApps, docBlocks, docShifts, postTurnoDates, isTarde);
-            const c = tRow.getCell(di + 9);
-            if (r) { c.value = r.text; applyStyle(c, r.bg, true, r.white ? C.WHITE : 'FF1A1A1A'); }
-            else { applyStyle(c, C.NONE, false, 'FF111111'); }
-          });
-
-          rowNum++;
-        }
-      }
+    for (const [label, bg] of LEGEND_ITEMS) {
+      const lRow = ws.getRow(lr);
+      lRow.height = 16;
+      const colorCell = lRow.getCell(LEGEND_COL);
+      colorCell.value = '';
+      // Feriado en leyenda: borde visible con fondo blanco
+      applyStyle(colorCell, bg === C.FERIADO_BG ? C.WHITE : bg, false, bg === C.TURNO_24H ? C.WHITE : 'FF1A1A1A');
+      const labelCell = lRow.getCell(LEGEND_COL + 1);
+      labelCell.value = label;
+      applyStyle(labelCell, C.NONE, false, 'FF1A1A1A', 'left');
+      lr++;
     }
 
-    // ── Legend: columna 15+ (fuera de las tablas de semanas) ──────────────
-    if (firstWeekStartRow > 0) {
-      let lr = firstWeekStartRow;
-      const legH = ws.getRow(lr);
-      legH.height = 18;
-      const lhC = legH.getCell(15);
-      lhC.value = 'LEYENDA';
-      applyStyle(lhC, C.SUBHEADER, true, C.WHITE, 'left');
-      ws.mergeCells(lr, 15, lr, 17);
-      lr++;
-      for (const [label, bg] of LEGEND_ITEMS) {
-        const lRow = ws.getRow(lr);
-        lRow.height = 16;
-        const lCell = lRow.getCell(15);
-        lCell.value = label;
-        applyStyle(lCell, bg, false, bg === C.TURNO_24H ? C.WHITE : 'FF1A1A1A', 'left');
-        ws.mergeCells(lr, 15, lr, 17);
-        lr++;
-      }
+    // Bottom section: weeks 3,4 — start after top section + 1 gap row
+    if (bottomWeeks.length > 0) {
+      // Lateral cols para bloques inferiores: misma lógica → 7, 14
+      const BOTTOM_LATERAL_COLS = [7, 14];
+      const bottomStartRow = topStartRow + 2 + slotsCount + 1; // header + date + slots + gap
+      bottomWeeks.forEach((week, wi) => {
+        writeWeekPanel(ws, week, WEEK_COL_STARTS[wi], bottomStartRow, slotRange, docApps, docBlocks, docShifts, postTurnoDates, isTarde, BOTTOM_LATERAL_COLS[wi]);
+      });
     }
   }
 
@@ -607,7 +595,7 @@ export async function exportDoctorsToExcel(
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Programacion_Consultas_${period}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.download = `Rotativa_${period}_${new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

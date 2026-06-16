@@ -15,7 +15,7 @@ import {
   fetchDoctors, upsertDoctor, deleteDoctor,
   fetchAppointments, upsertAppointment, deleteAppointment, deleteManyAppointments,
   fetchBlockedDays, upsertBlockedDay, deleteBlockedDay, deleteManyBlockedDays,
-  fetchShifts24h, upsertShift24h, deleteShift24h,
+  fetchShifts24h, upsertShift24h, deleteShift24h, deleteManyShifts24h,
 } from './lib/supabase';
 import WeeklyCalendar from './components/WeeklyCalendar';
 import DoctorManager from './components/DoctorManager';
@@ -49,11 +49,19 @@ export default function App() {
   const [shifts24h, setShifts24h] = useState<Shift24h[]>([]);
 
   const [selectedPeriod, setSelectedPeriod] = useState<string>(() => {
+    const saved = localStorage.getItem('agenda_selectedPeriod');
+    if (saved && /^\d{4}-\d{2}$/.test(saved)) return saved;
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
 
+  const handlePeriodChange = (period: string) => {
+    setSelectedPeriod(period);
+    localStorage.setItem('agenda_selectedPeriod', period);
+  };
+
   const [activeTab, setActiveTab] = useState<'calendar' | 'monthly' | 'appointments' | 'blockings' | 'doctors' | 'sheets'>('calendar');
+  const [weekFocusDate, setWeekFocusDate] = useState<string | undefined>(undefined);
   const [shortcutData, setShortcutData] = useState<{
     doctorId?: string;
     date?: string;
@@ -188,6 +196,21 @@ export default function App() {
     setAppointments(prev => prev.filter(a => !a.date.startsWith(selectedPeriod)));
   }, [appointments, selectedPeriod]);
 
+  const handleClearDoctorMonth = useCallback(async (doctorId: string, mode: 'appointments' | 'all') => {
+    const appsToDelete = appointments.filter(a => a.doctorId === doctorId && a.date.startsWith(selectedPeriod));
+    if (appsToDelete.length > 0) {
+      await deleteManyAppointments(appsToDelete.map(a => a.id));
+      setAppointments(prev => prev.filter(a => !(a.doctorId === doctorId && a.date.startsWith(selectedPeriod))));
+    }
+    if (mode === 'all') {
+      const guardsToDelete = shifts24h.filter(s => s.doctorId === doctorId && s.date.startsWith(selectedPeriod));
+      if (guardsToDelete.length > 0) {
+        await deleteManyShifts24h(guardsToDelete.map(s => s.id));
+        setShifts24h(prev => prev.filter(s => !(s.doctorId === doctorId && s.date.startsWith(selectedPeriod))));
+      }
+    }
+  }, [appointments, shifts24h, selectedPeriod]);
+
   const handleAutoSchedule = useCallback(async (generatedApps: Appointment[], generatedGuards: Shift24h[] = []) => {
     const existingAppKeys = new Set(appointments.map(a => `${a.doctorId}-${a.date}-${a.shift}`));
     const newApps = generatedApps.filter(a => !existingAppKeys.has(`${a.doctorId}-${a.date}-${a.shift}`));
@@ -294,7 +317,7 @@ export default function App() {
                   id="month-selector"
                   type="month"
                   value={selectedPeriod}
-                  onChange={e => setSelectedPeriod(e.target.value)}
+                  onChange={e => handlePeriodChange(e.target.value)}
                   className="bg-transparent text-white text-xs font-semibold border-0 outline-none cursor-pointer"
                 />
               </div>
@@ -461,6 +484,8 @@ export default function App() {
                 onToggleShift24h={handleToggleShift24h}
                 onEditAppointment={handleCalendarAddAppointment}
                 onEditBlock={handleCalendarAddBlock}
+                onDayActioned={date => setWeekFocusDate(date)}
+                onClearMonth={handleClearDoctorMonth}
               />
               <WeeklyCalendar
                 doctors={doctors}
@@ -468,6 +493,7 @@ export default function App() {
                 blockedDays={blockedDays}
                 shifts24h={shifts24h}
                 selectedPeriod={selectedPeriod}
+                focusDate={weekFocusDate}
                 onToggleShift24h={handleToggleShift24h}
                 onAddAppointmentClick={handleCalendarAddAppointment}
                 onAddBlockClick={handleCalendarAddBlock}

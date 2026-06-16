@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Ban, CalendarDays, Edit3, Moon, Stethoscope, Zap } from 'lucide-react';
+import { Ban, CalendarDays, Edit3, Moon, Stethoscope, Trash2, Zap } from 'lucide-react';
 import { Appointment, BlockedDay, Doctor, Shift24h } from '../types';
 import { isChileanHoliday } from '../utils';
 
@@ -19,6 +19,7 @@ interface MonthlyDoctorPlannerProps {
   onEditAppointment: (doctorId: string, date: string, shift: any) => void;
   onEditBlock: (doctorId: string, date: string, shift: any) => void;
   onDayActioned?: (date: string) => void;
+  onClearMonth?: (doctorId: string, mode: 'appointments' | 'all') => void;
 }
 
 const modes: Array<{ value: PlannerMode; label: string; icon: React.ElementType }> = [
@@ -56,12 +57,14 @@ export default function MonthlyDoctorPlanner({
   onEditAppointment,
   onEditBlock,
   onDayActioned,
+  onClearMonth,
 }: MonthlyDoctorPlannerProps) {
   const activeDoctors = doctors.filter((doctor) => doctor.isActive);
   const [selectedDoctorId, setSelectedDoctorId] = useState(activeDoctors[0]?.id || doctors[0]?.id || '');
   const [mode, setMode] = useState<PlannerMode>('appointment');
   const [message, setMessage] = useState('');
   const [autoStartDay, setAutoStartDay] = useState<number | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const fullDayShift = 'Todo el día' as BlockedDay['shift'];
 
   const selectedDoctor = doctors.find((doctor) => doctor.id === selectedDoctorId) || activeDoctors[0] || doctors[0];
@@ -238,9 +241,19 @@ export default function MonthlyDoctorPlanner({
         </div>
 
         <div className="flex flex-col sm:flex-row gap-2">
+          <button
+            type="button"
+            onClick={() => { setShowClearConfirm(true); setMessage(''); }}
+            className="flex items-center gap-1 px-3 py-2 text-xs font-bold rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-all"
+            title="Limpiar programación del mes"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Limpiar mes
+          </button>
+
           <select
             value={selectedDoctor?.id || ''}
-            onChange={(event) => { setSelectedDoctorId(event.target.value); setAutoStartDay(null); setMessage(''); }}
+            onChange={(event) => { setSelectedDoctorId(event.target.value); setAutoStartDay(null); setMessage(''); setShowClearConfirm(false); }}
             className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white font-semibold text-slate-700"
           >
             {activeDoctors.map((doctor) => (
@@ -331,6 +344,47 @@ export default function MonthlyDoctorPlanner({
             );
           })}
         </div>
+
+        {showClearConfirm && (
+          <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1 text-[11px] text-rose-800">
+              <p className="font-black mb-0.5">¿Qué deseas eliminar para {selectedDoctor?.name} en {selectedPeriod}?</p>
+              <p className="font-medium">Esta acción no se puede deshacer.</p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="px-3 py-2 text-xs font-bold rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onClearMonth?.(selectedDoctor!.id, 'appointments');
+                  setShowClearConfirm(false);
+                  setMessage(`✅ Consultas eliminadas para ${selectedDoctor?.name} en ${selectedPeriod}.`);
+                }}
+                className="px-3 py-2 text-xs font-black rounded-lg bg-orange-500 text-white hover:bg-orange-600 transition-all shadow-sm"
+              >
+                Solo consultas
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onClearMonth?.(selectedDoctor!.id, 'all');
+                  setShowClearConfirm(false);
+                  setMessage(`✅ Consultas y guardias eliminadas para ${selectedDoctor?.name} en ${selectedPeriod}.`);
+                }}
+                className="flex items-center gap-1 px-3 py-2 text-xs font-black rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition-all shadow-sm"
+              >
+                <Trash2 className="w-3 h-3" />
+                Todo (consultas + guardias)
+              </button>
+            </div>
+          </div>
+        )}
 
         {mode === 'auto' && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 flex flex-col sm:flex-row sm:items-center gap-3">

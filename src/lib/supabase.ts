@@ -193,3 +193,9 @@ export async function deleteShift24h(id: string): Promise<void> {
   const { error } = await supabase.from('shifts24h').delete().eq('id', id);
   if (error) throw error;
 }
+
+export async function deleteManyShifts24h(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await supabase.from('shifts24h').delete().in('id', ids);
+  if (error) throw error;
+}

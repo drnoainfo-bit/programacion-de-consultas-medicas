@@ -3,6 +3,7 @@ import { Doctor, Appointment, BlockedDay, Shift24h } from '../types';
 import ConfirmModal from './ConfirmModal';
 import { formatReadableDate } from '../utils';
 import { AlertTriangle, CheckCircle, Sparkles, Trash2, ShieldAlert } from 'lucide-react';
+import { CHILEAN_HOLIDAYS_2026 } from '../utils';
 
 interface ValidationPanelProps {
   doctors: Doctor[];
@@ -23,8 +24,6 @@ export interface RuleViolation {
   dateStr: string;
 }
 
-// Chilean Holidays in June 2026
-const CHILEAN_FERIADOS_JUNE_2026 = ['2026-06-21', '2026-06-29'];
 
 export default function ValidationPanel({
   doctors,
@@ -80,21 +79,21 @@ export default function ValidationPanel({
       const dateStr = app.date;
       const totalPatients = app.newAdmissions + app.controls;
 
-      // 1. Schedule on weekend (médico programado en día no disponible)
-      const dayOfWeek = new Date(dateStr).getDay(); // 0 is Sunday, 6 is Saturday
+      // Fin de semana: las consultas no se programan — si llega una, es error bloqueante
+      const dayOfWeek = new Date(dateStr + 'T12:00:00').getDay();
       if (dayOfWeek === 0 || dayOfWeek === 6) {
         list.push({
           id: `weekend-${app.id}`,
-          type: 'warning',
-          category: 'Día No Disponible',
-          message: `Médico programado en fin de semana (${dayOfWeek === 0 ? 'Domingo' : 'Sábado'}) no disponible para consulta ordinaria.`,
+          type: 'error',
+          category: 'Consulta en Fin de Semana',
+          message: `Consulta programada en ${dayOfWeek === 0 ? 'domingo' : 'sábado'}. Los fines de semana no admiten consultas ordinarias. Solo guardias 24h.`,
           doctorName: doc.name,
           dateStr
         });
       }
 
       // 3. Feriado / Feriado Legal (médico asignado en feriado)
-      const isFeriadoNational = CHILEAN_FERIADOS_JUNE_2026.includes(dateStr);
+      const isFeriadoNational = CHILEAN_HOLIDAYS_2026.includes(dateStr);
       const hasFeriadoBlock = blockedDaysInPeriod.some(b => 
         b.doctorId === app.doctorId && 
         b.date === dateStr && 
@@ -281,119 +280,73 @@ export default function ValidationPanel({
     return list;
   }, [doctors, appointments, blockedDays, shifts24h, selectedPeriod]);
 
-  // Handle auto-generation of active scheduling items with 6-day guard cycle projection
+  // Programa consultas en todos los días disponibles según el estado real registrado
   const handleAutoGenerateSchedules = () => {
     const generatedApps: Appointment[] = [];
-    
-    // Parse selected period
+
     const [yearStr, monthStr] = selectedPeriod.split('-');
-    const year = parseInt(yearStr, 10) || 2026;
-    const month = parseInt(monthStr, 10) || 6;
-    const totalDays = new Date(year, month, 0).getDate(); // total days in the target month
+    const year = parseInt(yearStr, 10) || new Date().getFullYear();
+    const month = parseInt(monthStr, 10) || new Date().getMonth() + 1;
+    const totalDays = new Date(year, month, 0).getDate();
 
     const parseLocalDate = (dateStr: string) => {
       const [y, m, d] = dateStr.split('-').map(Number);
-      return new Date(y, m - 1, d, 12, 0, 0); // midday to avoid timezone shifting issues
+      return new Date(y, m - 1, d, 12, 0, 0);
     };
 
-    // 1. Build list of projected 24h guards starting from each doctor's first manual guard and adding a guard every 6 days
-    const updatedGuardsList = [...shifts24h];
+    const fmt = (y: number, m: number, d: number) =>
+      `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
-    doctors.forEach((doc) => {
-      const docGuards = shifts24h.filter(s => s.doctorId === doc.id);
-      if (docGuards.length === 0) return; // No anchor guard for this doctor, don't project automatically
-
-      const sortedDates = docGuards.map(s => s.date).sort();
-      const T0 = parseLocalDate(sortedDates[0]);
-
-      // Project guards starting from T0 every 6 days, both forwards and backwards for the target month
-      for (let day = 1; day <= totalDays; day++) {
-        const currentDateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        const currentD = parseLocalDate(currentDateStr);
-        const diffDays = Math.round((currentD.getTime() - T0.getTime()) / (1000 * 60 * 60 * 24));
-
-        if (Math.abs(diffDays) % 6 === 0) {
-          // Check if this date has a guard shift already registered
-          const alreadyHasGuard = updatedGuardsList.some(g => g.doctorId === doc.id && g.date === currentDateStr);
-          if (!alreadyHasGuard) {
-            updatedGuardsList.push({
-              id: `projected-guard-${doc.id}-${currentDateStr}`,
-              doctorId: doc.id,
-              date: currentDateStr,
-              notes: 'Guardia de 24h (Proyección rotativa cada 6 días)'
-            });
-          }
-        }
-      }
-    });
-
-    // Create lookup sets for fast checks
-    const projectedGuardsMap = new Set(updatedGuardsList.map(g => `${g.doctorId}-${g.date}`));
+    // Usar solo guardias realmente registradas — sin proyección
+    const guardsMap = new Set(shifts24h.map(g => `${g.doctorId}-${g.date}`));
     const blocksMap = new Set(blockedDays.map(b => `${b.doctorId}-${b.date}-${b.shift}`));
-    const allBlocksSameDay = new Set(blockedDays.map(b => `${b.doctorId}-${b.date}-Todo el día`));
+    const existingAppKeys = new Set(appointments.map(a => `${a.doctorId}-${a.date}-${a.shift}`));
 
-    // Generate appointments
-    doctors.forEach((doc) => {
+    doctors.filter(d => d.isActive).forEach((doc) => {
       for (let day = 1; day <= totalDays; day++) {
-        const currentDateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        
-        // 1. Skip if weekend (médicos no atienden en fines de semana consulta general)
-        const dayOfWeek = new Date(currentDateStr).getDay();
+        const dateStr = fmt(year, month, day);
+        const dayOfWeek = parseLocalDate(dateStr).getDay();
+
+        // 1. Omitir fin de semana
         if (dayOfWeek === 0 || dayOfWeek === 6) continue;
 
-        // 2. Skip if Chilean National Holiday in June 2026 (June 21 or June 29)
-        if (CHILEAN_FERIADOS_JUNE_2026.includes(currentDateStr)) continue;
+        // 2. Omitir feriado
+        if (CHILEAN_HOLIDAYS_2026.includes(dateStr)) continue;
 
-        // 3. Skip if day matches a manual full blocking or any specific block for doc preferred shift
-        if (allBlocksSameDay.has(`${doc.id}-${currentDateStr}-Todo el día`) ||
-            blocksMap.has(`${doc.id}-${currentDateStr}-${doc.defaultShift}`) ||
-            blocksMap.has(`${doc.id}-${currentDateStr}-Todo el día`)) {
-          continue;
-        }
+        // 3. Omitir si ya tiene consulta
+        if (existingAppKeys.has(`${doc.id}-${dateStr}-${doc.defaultShift}`)) continue;
 
-        // 4. Skip if the doc has a 24-hour guard shift scheduled on THIS day (including projected ones)
-        if (projectedGuardsMap.has(`${doc.id}-${currentDateStr}`)) continue;
+        // 4. Omitir si tiene bloqueo ese día
+        if (
+          blocksMap.has(`${doc.id}-${dateStr}-${doc.defaultShift}`) ||
+          blocksMap.has(`${doc.id}-${dateStr}-Todo el día`)
+        ) continue;
 
-        // 5. Skip if YESTERDAY was a 24-hour guard shift for this doctor (POSTURNO DE DESCANSO!)
-        const yesterdayDate = parseLocalDate(currentDateStr);
-        yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-        const yesterdayString = yesterdayDate.toISOString().slice(0, 10);
-        if (projectedGuardsMap.has(`${doc.id}-${yesterdayString}`)) {
-          continue; // Respect the mandatory resting post-shift!
-        }
+        // 5. Omitir si tiene guardia ese día
+        if (guardsMap.has(`${doc.id}-${dateStr}`)) continue;
 
-        // Allocate patients based shift standard profiles
-        let admissions = 0;
-        let controls = 0;
-        let notesText = '';
+        // 6. Omitir si ayer tuvo guardia (post-turno de descanso)
+        const yesterday = parseLocalDate(dateStr);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = fmt(yesterday.getFullYear(), yesterday.getMonth() + 1, yesterday.getDate());
+        if (guardsMap.has(`${doc.id}-${yesterdayStr}`)) continue;
 
-        if (doc.defaultShift === 'Mañana') {
-          admissions = 3;  // standard 30 min slots
-          controls = 9;    // standard 30 min slots (Sum 12, fully packed and compliant)
-          notesText = 'Generado automáticamente - Jornada Mañana';
-        } else {
-          admissions = 2;  // standard afternoon slots
-          controls = 4;    // standard afternoon slots (Sum 6, perfectly compliant)
-          notesText = 'Generado automáticamente - Jornada Tarde';
-        }
-
-        const app: Appointment = {
-          id: `auto-app-${doc.id}-${currentDateStr}`,
+        generatedApps.push({
+          id: `auto-app-${doc.id}-${dateStr}`,
           doctorId: doc.id,
-          date: currentDateStr,
+          date: dateStr,
           shift: doc.defaultShift,
-          newAdmissions: admissions,
-          controls,
-          notes: notesText,
-          startTime: doc.defaultShift === 'Mañana' ? '09:00' : '14:00',
+          newAdmissions: 2,
+          controls: 3,
+          notes: `Generado automáticamente - Jornada ${doc.defaultShift}`,
+          startTime: doc.defaultShift === 'Tarde' ? '14:00' : '09:00',
           include800: false,
-          include830: false
-        };
-        generatedApps.push(app);
+          include830: false,
+        });
       }
     });
 
-    onAutoSchedule(generatedApps, updatedGuardsList);
+    onAutoSchedule(generatedApps, shifts24h);
   };
 
   const errors = violations.filter(v => v.type === 'error');

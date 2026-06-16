@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Ban, CalendarDays, Edit3, Moon, Stethoscope } from 'lucide-react';
+import { Ban, CalendarDays, Edit3, Moon, Stethoscope, Zap } from 'lucide-react';
 import { Appointment, BlockedDay, Doctor, Shift24h } from '../types';
+import { isChileanHoliday } from '../utils';
 
-type PlannerMode = 'appointment' | 'block' | 'guard' | 'edit';
+type PlannerMode = 'appointment' | 'block' | 'guard' | 'edit' | 'auto';
 
 interface MonthlyDoctorPlannerProps {
   doctors: Doctor[];
@@ -17,6 +18,7 @@ interface MonthlyDoctorPlannerProps {
   onToggleShift24h: (doctorId: string, date: string) => void;
   onEditAppointment: (doctorId: string, date: string, shift: any) => void;
   onEditBlock: (doctorId: string, date: string, shift: any) => void;
+  onDayActioned?: (date: string) => void;
 }
 
 const modes: Array<{ value: PlannerMode; label: string; icon: React.ElementType }> = [
@@ -24,6 +26,7 @@ const modes: Array<{ value: PlannerMode; label: string; icon: React.ElementType 
   { value: 'block', label: 'Bloquear', icon: Ban },
   { value: 'guard', label: 'Guardia 24h', icon: Moon },
   { value: 'edit', label: 'Editar', icon: Edit3 },
+  { value: 'auto', label: 'Rotativa', icon: Zap },
 ];
 
 function parsePeriod(period: string) {
@@ -52,11 +55,13 @@ export default function MonthlyDoctorPlanner({
   onToggleShift24h,
   onEditAppointment,
   onEditBlock,
+  onDayActioned,
 }: MonthlyDoctorPlannerProps) {
   const activeDoctors = doctors.filter((doctor) => doctor.isActive);
   const [selectedDoctorId, setSelectedDoctorId] = useState(activeDoctors[0]?.id || doctors[0]?.id || '');
   const [mode, setMode] = useState<PlannerMode>('appointment');
   const [message, setMessage] = useState('');
+  const [autoStartDay, setAutoStartDay] = useState<number | null>(null);
   const fullDayShift = 'Todo el día' as BlockedDay['shift'];
 
   const selectedDoctor = doctors.find((doctor) => doctor.id === selectedDoctorId) || activeDoctors[0] || doctors[0];
@@ -88,9 +93,16 @@ export default function MonthlyDoctorPlanner({
     const hasGuard = doctorGuards.some((item) => item.date === date);
 
     if (mode === 'appointment') {
+      // Fin de semana: bloquear consultas, solo guardias permitidas
+      const dayOfWeek = new Date(year, month - 1, day, 12, 0, 0).getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        setMessage(`⚠️ No se pueden programar consultas en fin de semana. Usa el modo Guardia 24h si corresponde.`);
+        return;
+      }
       if (existingAppointment) {
         onDeleteAppointment(existingAppointment.id);
         setMessage(`Consulta desactivada para ${date}.`);
+        onDayActioned?.(date);
         return;
       }
       if (hasBlock || hasGuard) {
@@ -103,13 +115,14 @@ export default function MonthlyDoctorPlanner({
         date,
         shift,
         newAdmissions: 2,
-        controls: 4,
+        controls: 3,
         notes: 'Programado desde vista mensual',
         startTime: shift === 'Tarde' ? '14:00' : '09:00',
         include800: false,
         include830: false,
       });
-      setMessage(`Consulta agregada para ${date}: 2 ingresos y 4 controles.`);
+      setMessage(`Consulta agregada para ${date}: 2 ingresos y 3 controles.`);
+      onDayActioned?.(date);
       return;
     }
 
@@ -117,6 +130,7 @@ export default function MonthlyDoctorPlanner({
       if (existingBlock) {
         onDeleteBlock(existingBlock.id);
         setMessage(`Bloqueo desactivado para ${date}.`);
+        onDayActioned?.(date);
         return;
       }
       onAddBlock({
@@ -130,12 +144,20 @@ export default function MonthlyDoctorPlanner({
         endTime: '17:00',
       });
       setMessage(`Dia bloqueado para ${selectedDoctor.name}: ${date}.`);
+      onDayActioned?.(date);
       return;
     }
 
     if (mode === 'guard') {
       onToggleShift24h(selectedDoctor.id, date);
       setMessage(`${hasGuard ? 'Guardia retirada' : 'Guardia 24h activada'} para ${date}.`);
+      onDayActioned?.(date);
+      return;
+    }
+
+    if (mode === 'auto') {
+      setAutoStartDay(day);
+      setMessage(`Día de inicio seleccionado: ${date}. Pulsa "Programar rotativa" para automatizar.`);
       return;
     }
 
@@ -156,6 +178,52 @@ export default function MonthlyDoctorPlanner({
     setMessage('No hay consulta ni bloqueo para editar en ese dia.');
   };
 
+  const handleAutoSchedule = () => {
+    if (!selectedDoctor || autoStartDay === null) return;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const added: string[] = [];
+    const skipped: string[] = [];
+
+    let day = autoStartDay;
+    while (day <= daysInMonth) {
+      const date = formatDate(year, month, day);
+      const dayDate = new Date(year, month - 1, day, 12, 0, 0);
+      const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
+      const holiday = isChileanHoliday(date);
+      const hasApp = doctorAppointments.some((a) => a.date === date && a.shift === selectedDoctor.defaultShift);
+      const hasBlock = doctorBlocks.some((b) => b.date === date && (b.shift === selectedDoctor.defaultShift || b.shift === fullDayShift));
+      const hasGuard = doctorGuards.some((g) => g.date === date);
+
+      if (!isWeekend && !holiday && !hasApp && !hasBlock && !hasGuard) {
+        onAddAppointment({
+          doctorId: selectedDoctor.id,
+          date,
+          shift: selectedDoctor.defaultShift,
+          newAdmissions: 2,
+          controls: 3,
+          notes: 'Programado automáticamente (rotativa 6 días)',
+          startTime: selectedDoctor.defaultShift === 'Tarde' ? '14:00' : '09:00',
+          include800: false,
+          include830: false,
+        });
+        added.push(date);
+        onDayActioned?.(date);
+      } else {
+        skipped.push(date);
+      }
+
+      day += 6;
+    }
+
+    if (added.length > 0) {
+      setMessage(
+        `✅ ${added.length} consulta(s) programada(s).${skipped.length > 0 ? ` ${skipped.length} omitida(s) por fin de semana, feriado o conflicto.` : ''}`
+      );
+    } else {
+      setMessage('No se encontraron días hábiles disponibles para programar desde ese inicio.');
+    }
+  };
+
   return (
     <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden print:hidden" id="monthly-doctor-planner">
       <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
@@ -172,7 +240,7 @@ export default function MonthlyDoctorPlanner({
         <div className="flex flex-col sm:flex-row gap-2">
           <select
             value={selectedDoctor?.id || ''}
-            onChange={(event) => setSelectedDoctorId(event.target.value)}
+            onChange={(event) => { setSelectedDoctorId(event.target.value); setAutoStartDay(null); setMessage(''); }}
             className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white font-semibold text-slate-700"
           >
             {activeDoctors.map((doctor) => (
@@ -189,7 +257,7 @@ export default function MonthlyDoctorPlanner({
                 <button
                   key={option.value}
                   type="button"
-                  onClick={() => setMode(option.value)}
+                  onClick={() => { setMode(option.value); if (option.value !== 'auto') { setAutoStartDay(null); setMessage(''); } }}
                   className={`px-2 py-1.5 rounded-md text-[10px] font-bold flex items-center justify-center gap-1 transition-all ${
                     mode === option.value ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'
                   }`}
@@ -220,41 +288,95 @@ export default function MonthlyDoctorPlanner({
             const date = formatDate(year, month, day);
             const dayDate = new Date(year, month - 1, day, 12, 0, 0);
             const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
+            const isHoliday = isChileanHoliday(date);
             const appointment = doctorAppointments.find((item) => item.date === date);
             const block = doctorBlocks.find((item) => item.date === date);
             const guard = doctorGuards.find((item) => item.date === date);
 
+            const isAutoStart = mode === 'auto' && autoStartDay === day;
+            // days in auto preview: same pattern every 6 days from autoStartDay
+            const isAutoPreview = mode === 'auto' && autoStartDay !== null && day > autoStartDay && (day - autoStartDay) % 6 === 0;
+
             let statusClass = 'bg-white border-slate-200 hover:border-blue-400';
+            if (isHoliday && !block && !guard) statusClass = 'bg-red-50 border-red-200 text-red-950';
             if (appointment) statusClass = 'bg-blue-50 border-blue-200 text-blue-950';
             if (block) statusClass = 'bg-rose-50 border-rose-200 text-rose-950';
-            if (guard) statusClass = 'bg-indigo-50 border-indigo-200 text-indigo-950';
+            if (guard) statusClass = 'bg-[#CC00FF] border-[#9900CC] text-white';
             if (isWeekend && !guard) statusClass = 'bg-slate-50 border-slate-200 text-slate-400';
+            if (isAutoStart) statusClass = 'bg-amber-400 border-amber-600 text-white ring-2 ring-amber-500';
+            if (isAutoPreview && !isWeekend && !isHoliday && !block && !guard && !appointment) statusClass = 'bg-amber-100 border-amber-400 text-amber-900';
 
             return (
               <button
                 key={date}
                 type="button"
                 onClick={() => handleDayClick(day)}
-                className={`aspect-square min-h-[64px] rounded-lg border p-1.5 text-left transition-all ${statusClass}`}
-                title={`${date} - ${selectedDoctor?.name || ''}`}
+                className={`relative aspect-square min-h-[64px] rounded-lg border p-1.5 text-left transition-all ${statusClass}`}
+                title={`${date} - ${selectedDoctor?.name || ''}${isHoliday ? ' — Feriado Nacional' : ''}`}
               >
+                {isHoliday && (
+                  <span className="absolute top-0.5 right-0.5 text-[11px] leading-none" title="Feriado Nacional">🏖️</span>
+                )}
                 <span className="text-xs font-black font-mono">{day}</span>
                 <div className="mt-1 space-y-0.5 text-[8.5px] font-bold leading-tight">
-                  {guard && <div className="text-indigo-700">Guardia</div>}
+                  {guard && <div className="text-white">Guardia</div>}
                   {block && <div className="text-rose-700">Bloqueado</div>}
                   {appointment && <div className="text-blue-700">{appointment.newAdmissions}+{appointment.controls}</div>}
-                  {!guard && !block && !appointment && !isWeekend && <div className="text-emerald-700">Libre</div>}
+                  {isHoliday && !guard && !block && !appointment && <div className="text-red-600">Feriado</div>}
+                  {isAutoStart && <div className="text-white">Inicio</div>}
+                  {isAutoPreview && !isWeekend && !isHoliday && !block && !guard && !appointment && <div className="text-amber-700">Rotativa</div>}
+                  {!guard && !block && !appointment && !isWeekend && !isHoliday && !isAutoStart && !isAutoPreview && <div className="text-emerald-700">Libre</div>}
                 </div>
               </button>
             );
           })}
         </div>
 
+        {mode === 'auto' && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1 text-[11px] text-amber-800">
+              <p className="font-black mb-0.5">Modo Rotativa automática</p>
+              <p className="font-medium">
+                {autoStartDay === null
+                  ? 'Haz clic en el primer día del turno del médico. Se marcarán en amarillo los días siguientes cada 6 días.'
+                  : `Inicio: día ${autoStartDay} del mes. Los días marcados en amarillo se programarán al confirmar.`}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {autoStartDay !== null && (
+                <button
+                  type="button"
+                  onClick={() => { setAutoStartDay(null); setMessage(''); }}
+                  className="px-3 py-2 text-xs font-bold rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 transition-all"
+                >
+                  Limpiar
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={autoStartDay === null}
+                onClick={handleAutoSchedule}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-black rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                Programar rotativa
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px]">
           <div className="flex flex-wrap gap-2 font-bold">
             <span className="px-2 py-1 rounded bg-blue-50 text-blue-700 border border-blue-100">Consulta</span>
             <span className="px-2 py-1 rounded bg-rose-50 text-rose-700 border border-rose-100">Bloqueado</span>
-            <span className="px-2 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">Guardia</span>
+            <span className="px-2 py-1 rounded bg-[#CC00FF] text-white border border-[#9900CC]">Guardia</span>
+            <span className="px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200">🏖️ Feriado</span>
+            {mode === 'auto' && (
+              <>
+                <span className="px-2 py-1 rounded bg-amber-400 text-white border border-amber-600">Inicio rotativa</span>
+                <span className="px-2 py-1 rounded bg-amber-100 text-amber-900 border border-amber-400">Día rotativa</span>
+              </>
+            )}
           </div>
           {message && <span className="text-slate-600 font-semibold">{message}</span>}
         </div>

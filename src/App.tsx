@@ -27,6 +27,7 @@ import MonthlyDoctorPlanner from './components/MonthlyDoctorPlanner';
 import ConfirmModal from './components/ConfirmModal';
 import {
   Calendar,
+  CalendarDays,
   Users,
   AlertTriangle,
   UserCheck,
@@ -34,6 +35,7 @@ import {
   Activity,
   ClipboardList,
   FileSpreadsheet,
+  ChevronRight,
 } from 'lucide-react';
 
 type AppStatus = 'loading' | 'ready' | 'error';
@@ -328,288 +330,267 @@ export default function App() {
     );
   }
 
+  const NAV_ITEMS = [
+    { id: 'calendar',     label: 'Agenda Semanal',  icon: Calendar,     section: 'Vistas' },
+    { id: 'monthly',      label: 'Agenda Mensual',  icon: CalendarDays, section: 'Vistas' },
+    { id: 'appointments', label: 'Citas Medicas',   icon: UserCheck,    section: 'Datos' },
+    { id: 'blockings',    label: 'Bloqueos',        icon: AlertTriangle,section: 'Datos' },
+    { id: 'doctors',      label: 'Medicos',         icon: Users,        section: 'Datos' },
+  ] as const;
+
+  const TAB_LABELS: Record<string, string> = {
+    calendar:     'Agenda Semanal',
+    monthly:      'Agenda Mensual',
+    appointments: 'Citas Medicas',
+    blockings:    'Bloqueos de Agenda',
+    doctors:      'Gestion de Medicos',
+  };
+
   return (
-    <div className="min-h-screen bg-[#f8fafc] flex flex-col font-sans" id="app-viewport">
-      <header className="bg-slate-900 text-white border-b border-slate-800 shadow-sm relative z-10 print:hidden" id="app-header">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="h-screen bg-slate-50 flex flex-col font-sans overflow-hidden" id="app-viewport">
 
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-blue-600/20 text-blue-400 rounded-lg border border-blue-500/30">
-                <Activity className="w-5 h-5 text-blue-400" />
-              </div>
-              <div>
-                <span className="text-[9px] uppercase font-bold tracking-wider text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded border border-blue-800/60 font-mono">
-                  Gestion de Agendas Medicas v2.4
-                </span>
-                <h1 className="text-lg font-bold tracking-tight mt-0.5" id="app-main-title">
-                  Planificador de Consultas Medicas
-                </h1>
-              </div>
+      {/* ── Header ───────────────────────────────────────────────── */}
+      <header className="bg-slate-900 text-white border-b border-slate-800 shadow-sm z-20 shrink-0 print:hidden" id="app-header">
+        <div className="px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-teal-600/20 text-teal-400 rounded-lg border border-teal-500/30">
+              <Activity className="w-4 h-4" />
             </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-
-              <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5">
-                <Calendar className="w-4 h-4 text-blue-400 shrink-0" />
-                <label htmlFor="month-selector" className="text-[10px] font-bold uppercase tracking-wider text-slate-400 whitespace-nowrap">
-                  Mes programado
-                </label>
-                <input
-                  id="month-selector"
-                  type="month"
-                  value={selectedPeriod}
-                  onChange={e => handlePeriodChange(e.target.value)}
-                  className="bg-transparent text-white text-xs font-semibold border-0 outline-none cursor-pointer"
-                />
-              </div>
-
-              <button
-                onClick={handleDownloadExcel}
-                className="flex items-center gap-1.5 px-3.5 py-2 font-semibold text-xs text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer shadow-sm transition-all border border-emerald-500/20 active:scale-95"
-                title="Generar planilla Excel con pestañas divididas por médico"
-                id="btn-download-master-excel"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
-                <span>Descargar Planilla Excel</span>
-              </button>
-
-              <button
-                onClick={() => setShowResetConfirm(true)}
-                className="px-3 py-2 text-[10px] font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-all border border-slate-700"
-                id="btn-reset-data"
-              >
-                Restaurar Ejemplos
-              </button>
+            <div>
+              <span className="text-[8px] uppercase font-bold tracking-wider text-teal-400 font-mono">
+                Gestion de Agendas Medicas v2.4
+              </span>
+              <h1 className="text-sm font-bold tracking-tight leading-none mt-0.5" id="app-main-title">
+                Planificador de Consultas Medicas
+              </h1>
             </div>
+          </div>
 
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5">
+              <Calendar className="w-3.5 h-3.5 text-teal-400 shrink-0" />
+              <label htmlFor="month-selector" className="text-[9px] font-bold uppercase tracking-wider text-slate-400 whitespace-nowrap">
+                Mes
+              </label>
+              <input
+                id="month-selector"
+                type="month"
+                value={selectedPeriod}
+                onChange={e => handlePeriodChange(e.target.value)}
+                className="bg-transparent text-white text-xs font-semibold border-0 outline-none cursor-pointer"
+              />
+            </div>
+            <button
+              onClick={handleDownloadExcel}
+              className="flex items-center gap-1.5 px-3 py-1.5 font-semibold text-xs text-white bg-teal-600 hover:bg-teal-500 rounded-lg cursor-pointer transition-all active:scale-95"
+              title="Descargar planilla Excel"
+              id="btn-download-master-excel"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Descargar Excel</span>
+            </button>
+            <button
+              onClick={() => setShowResetConfirm(true)}
+              className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-all border border-slate-700"
+              id="btn-reset-data"
+            >
+              Restaurar
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="flex-grow max-w-7xl w-full mx-auto p-4 sm:p-5 lg:p-6 space-y-4" id="app-main-content">
+      {/* ── Body: sidebar + content ───────────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden">
 
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 print:hidden" id="stats-dashboard">
+        {/* ── Sidebar ──────────────────────────────────────────────── */}
+        <aside className="w-56 shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col print:hidden overflow-y-auto" id="app-sidebar">
 
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between gap-3">
-            <div>
-              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Total Medicos</span>
-              <span className="text-xl font-extrabold text-slate-900 mt-0.5 block font-mono">{totalDoctors}</span>
+          {/* Stats */}
+          <div className="p-3 space-y-2 border-b border-slate-800">
+            <p className="text-[9px] uppercase font-bold tracking-widest text-slate-500 px-1 mb-1">Resumen del mes</p>
+
+            <div className="flex items-center justify-between bg-slate-800 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2">
+                <Users className="w-3.5 h-3.5 text-slate-400" />
+                <span className="text-[10px] text-slate-300">Total Medicos</span>
+              </div>
+              <span className="text-sm font-extrabold text-white font-mono">{totalDoctors}</span>
             </div>
-            <div className="p-2.5 bg-slate-50 text-slate-600 rounded-lg border border-slate-200">
-              <Users className="w-4 h-4" />
+
+            <div className="flex items-center justify-between bg-slate-800 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="w-3.5 h-3.5 text-slate-400" />
+                <span className="text-[10px] text-slate-300">Turno Tarde</span>
+              </div>
+              <span className="text-sm font-extrabold text-white font-mono">{afternoonDoctorsCount}</span>
+            </div>
+
+            <div className="flex items-center justify-between bg-teal-900/60 border border-teal-700/40 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2">
+                <UserCheck className="w-3.5 h-3.5 text-teal-400" />
+                <span className="text-[10px] text-teal-200">Citas activas</span>
+              </div>
+              <span className="text-sm font-extrabold text-teal-300 font-mono">{totalActiveApps}</span>
+            </div>
+
+            <div className="flex items-center justify-between bg-rose-900/40 border border-rose-700/30 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                <span className="text-[10px] text-rose-200">Bloqueos</span>
+              </div>
+              <span className="text-sm font-extrabold text-rose-300 font-mono">{totalBlockedDays}</span>
             </div>
           </div>
 
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between gap-3">
-            <div>
-              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Turno Tarde (Reglamento)</span>
-              <span className="text-xl font-extrabold text-slate-900 mt-0.5 block font-mono">{afternoonDoctorsCount}</span>
-            </div>
-            <div className="p-2.5 bg-slate-50 text-slate-600 rounded-lg border border-slate-200">
-              <ClipboardList className="w-4 h-4" />
-            </div>
-          </div>
+          {/* Nav */}
+          <nav className="flex-1 p-3 space-y-4">
+            {(['Vistas', 'Datos'] as const).map(section => (
+              <div key={section}>
+                <p className="text-[9px] uppercase font-bold tracking-widest text-slate-500 px-2 mb-1">{section}</p>
+                <div className="space-y-0.5">
+                  {NAV_ITEMS.filter(n => n.section === section).map(({ id, label, icon: Icon }) => {
+                    const isActive = activeTab === id;
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => {
+                          setShortcutData(null);
+                          setActiveTab(id as any);
+                        }}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                          isActive
+                            ? 'bg-teal-600 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                        id={`tab-${id}`}
+                      >
+                        <Icon className="w-3.5 h-3.5 shrink-0" />
+                        <span className="flex-1 text-left">{label}</span>
+                        {isActive && <ChevronRight className="w-3 h-3 opacity-60" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </nav>
 
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between gap-3">
-            <div>
-              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Citas Programadas</span>
-              <span className="text-xl font-extrabold text-blue-600 mt-0.5 block font-mono">{totalActiveApps}</span>
-            </div>
-            <div className="p-2.5 bg-blue-50 text-blue-600 rounded-lg border border-blue-200">
-              <UserCheck className="w-4 h-4" />
-            </div>
-          </div>
-
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between gap-3">
-            <div>
-              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Bloqueos de Agenda</span>
-              <span className="text-xl font-extrabold text-rose-600 mt-0.5 block font-mono">{totalBlockedDays}</span>
-            </div>
-            <div className="p-2.5 bg-rose-50 text-rose-600 rounded-lg border border-rose-250">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-          </div>
-
-        </section>
-
-        <div className="flex flex-wrap bg-slate-100 p-1 rounded-xl max-w-2xl mx-auto border border-slate-200 shadow-sm print:hidden" id="app-tabs-container">
-          <button
-            onClick={() => { setShortcutData(null); setActiveTab('calendar'); }}
-            className={`flex-1 min-w-[100px] py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'calendar' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-            id="tab-calendar"
-          >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Agenda Semanal</span>
-          </button>
-
-          <button
-            onClick={() => { setShortcutData(null); setActiveTab('monthly'); }}
-            className={`flex-1 min-w-[100px] py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-              activeTab === 'monthly' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-            id="tab-monthly"
-          >
-            🗓️ Agenda Mensual
-          </button>
-
-          <button
-            onClick={() => setActiveTab('appointments')}
-            className={`flex-1 min-w-[100px] py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'appointments' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-            id="tab-appointments"
-          >
-            <UserCheck className="w-3.5 h-3.5" />
-            <span>Citas Medicas</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('blockings')}
-            className={`flex-1 min-w-[100px] py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'blockings' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-            id="tab-blockings"
-          >
-            <AlertTriangle className="w-3.5 h-3.5" />
-            <span>Bloqueos</span>
-          </button>
-
-          <button
-            onClick={() => { setShortcutData(null); setActiveTab('doctors'); }}
-            className={`flex-1 min-w-[100px] py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'doctors' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-            id="tab-doctors"
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Medicos</span>
-          </button>
-
-        </div>
-
-        <div className="transition-all duration-200" id="tab-content-viewport">
-
-          {activeTab === 'calendar' && (
-            <div className="space-y-5 animate-fade-in">
-              <ValidationPanel
-                doctors={doctors}
-                appointments={appointments}
-                blockedDays={blockedDays}
-                shifts24h={shifts24h}
-                selectedPeriod={selectedPeriod}
-                onAutoSchedule={handleAutoSchedule}
-                onClearAppointments={handleClearAppointments}
-              />
-              <MonthlyDoctorPlanner
-                doctors={doctors}
-                appointments={appointments}
-                blockedDays={blockedDays}
-                shifts24h={shifts24h}
-                selectedPeriod={selectedPeriod}
-                onAddAppointment={handleUpsertAppointment}
-                onAddBlock={handleAddBlock}
-                onDeleteAppointment={handleCancelAppointment}
-                onDeleteBlock={handleDeleteBlock}
-                onToggleShift24h={handleToggleShift24h}
-                onEditAppointment={handleCalendarAddAppointment}
-                onEditBlock={handleCalendarAddBlock}
-                onDayActioned={date => setWeekFocusDate(date)}
-                onClearMonth={handleClearDoctorMonth}
-              />
-              <WeeklyCalendar
-                doctors={doctors}
-                appointments={appointments}
-                blockedDays={blockedDays}
-                shifts24h={shifts24h}
-                selectedPeriod={selectedPeriod}
-                focusDate={weekFocusDate}
-                onToggleShift24h={handleToggleShift24h}
-                onAddAppointmentClick={handleCalendarAddAppointment}
-                onAddBlockClick={handleCalendarAddBlock}
-                onAddSlotBlock={handleAddSlotBlock}
-              />
-            </div>
-          )}
-
-          {activeTab === 'monthly' && (
-            <MonthlyCalendar
-              doctors={doctors}
-              appointments={appointments}
-              blockedDays={blockedDays}
-              shifts24h={shifts24h}
-              onAddAppointmentClick={handleCalendarAddAppointment}
-              onAddBlockClick={handleCalendarAddBlock}
-              onToggleShift24h={handleToggleShift24h}
-            />
-          )}
-
-          {activeTab === 'appointments' && (
-            <AppointmentsManager
-              doctors={doctors.filter(d => d.isActive)}
-              appointments={appointments}
-              blockedDays={blockedDays}
-              shifts24h={shifts24h}
-              onAddAppointment={handleUpsertAppointment}
-              onCancelAppointment={handleCancelAppointment}
-              onUpdateAppStatus={handleUpdateAppStatus}
-              defaultDate={shortcutData?.date}
-              defaultDoctorId={shortcutData?.doctorId}
-              defaultShift={shortcutData?.shift as any}
-            />
-          )}
-
-          {activeTab === 'blockings' && (
-            <BlockingsManager
-              doctors={doctors}
-              blockedDays={blockedDays}
-              onAddBlock={handleAddBlock}
-              onDeleteBlock={handleDeleteBlock}
-              defaultDate={shortcutData?.date}
-              defaultDoctorId={shortcutData?.doctorId}
-              defaultShift={shortcutData?.shift as any}
-              defaultStartTime={shortcutData?.startTime}
-              defaultEndTime={shortcutData?.endTime}
-            />
-          )}
-
-          {activeTab === 'doctors' && (
-            <DoctorManager
-              doctors={doctors}
-              onAddDoctor={handleAddDoctor}
-              onUpdateDoctor={handleUpdateDoctor}
-              onDeleteDoctor={handleDeleteDoctor}
-            />
-          )}
-
-        </div>
-
-        <section className="bg-emerald-50 rounded-2xl p-6 border border-emerald-100 flex flex-col md:flex-row md:items-center md:justify-between gap-6 print:hidden" id="excel-helper-banner">
-          <div className="space-y-1">
-            <h4 className="font-semibold text-emerald-900 text-sm flex items-center gap-2">
-              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-              Sincronización a Planilla (Plataforma de Hojas de Cálculo)
-            </h4>
-            <p className="text-xs text-emerald-800">
-              La plataforma le permite exportar los datos ingresados en un archivo de Excel (.xlsx) estructurado con <strong>una hoja independiente para cada médico</strong>.
+          {/* Footer sidebar */}
+          <div className="p-3 border-t border-slate-800">
+            <p className="text-[8px] text-slate-600 text-center leading-relaxed">
+              © 2026 Policlinico de Especialidades
             </p>
           </div>
-          <button
-            onClick={handleDownloadExcel}
-            className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all whitespace-nowrap active:scale-95 inline-flex items-center gap-2"
-          >
-            <Download className="w-4 h-4" />
-            Descargar Libro de Excel (.xlsx)
-          </button>
-        </section>
+        </aside>
 
-      </main>
+        {/* ── Main content ─────────────────────────────────────────── */}
+        <main className="flex-1 overflow-y-auto bg-slate-50" id="app-main-content">
 
-      <footer className="bg-slate-100 border-t border-slate-200/60 py-6 text-center text-xs text-slate-500 print:hidden" id="app-footer">
-        <p>© 2026 Policlinico de Especialidades. Sistema Automatizado de Gestion y Programacion de Turnos de Consultas.</p>
-      </footer>
+          {/* Page header */}
+          <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-2 print:hidden">
+            <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">Menu</span>
+            <ChevronRight className="w-3 h-3 text-slate-300" />
+            <span className="text-sm font-bold text-slate-800">{TAB_LABELS[activeTab]}</span>
+          </div>
+
+          <div className="p-5" id="tab-content-viewport">
+
+            {activeTab === 'calendar' && (
+              <div className="space-y-5">
+                <ValidationPanel
+                  doctors={doctors}
+                  appointments={appointments}
+                  blockedDays={blockedDays}
+                  shifts24h={shifts24h}
+                  selectedPeriod={selectedPeriod}
+                  onAutoSchedule={handleAutoSchedule}
+                  onClearAppointments={handleClearAppointments}
+                />
+                <MonthlyDoctorPlanner
+                  doctors={doctors}
+                  appointments={appointments}
+                  blockedDays={blockedDays}
+                  shifts24h={shifts24h}
+                  selectedPeriod={selectedPeriod}
+                  onAddAppointment={handleUpsertAppointment}
+                  onAddBlock={handleAddBlock}
+                  onDeleteAppointment={handleCancelAppointment}
+                  onDeleteBlock={handleDeleteBlock}
+                  onToggleShift24h={handleToggleShift24h}
+                  onEditAppointment={handleCalendarAddAppointment}
+                  onEditBlock={handleCalendarAddBlock}
+                  onDayActioned={date => setWeekFocusDate(date)}
+                  onClearMonth={handleClearDoctorMonth}
+                />
+                <WeeklyCalendar
+                  doctors={doctors}
+                  appointments={appointments}
+                  blockedDays={blockedDays}
+                  shifts24h={shifts24h}
+                  selectedPeriod={selectedPeriod}
+                  focusDate={weekFocusDate}
+                  onToggleShift24h={handleToggleShift24h}
+                  onAddAppointmentClick={handleCalendarAddAppointment}
+                  onAddBlockClick={handleCalendarAddBlock}
+                  onAddSlotBlock={handleAddSlotBlock}
+                />
+              </div>
+            )}
+
+            {activeTab === 'monthly' && (
+              <MonthlyCalendar
+                doctors={doctors}
+                appointments={appointments}
+                blockedDays={blockedDays}
+                shifts24h={shifts24h}
+                onAddAppointmentClick={handleCalendarAddAppointment}
+                onAddBlockClick={handleCalendarAddBlock}
+                onToggleShift24h={handleToggleShift24h}
+              />
+            )}
+
+            {activeTab === 'appointments' && (
+              <AppointmentsManager
+                doctors={doctors.filter(d => d.isActive)}
+                appointments={appointments}
+                blockedDays={blockedDays}
+                shifts24h={shifts24h}
+                onAddAppointment={handleUpsertAppointment}
+                onCancelAppointment={handleCancelAppointment}
+                onUpdateAppStatus={handleUpdateAppStatus}
+                defaultDate={shortcutData?.date}
+                defaultDoctorId={shortcutData?.doctorId}
+                defaultShift={shortcutData?.shift as any}
+              />
+            )}
+
+            {activeTab === 'blockings' && (
+              <BlockingsManager
+                doctors={doctors}
+                blockedDays={blockedDays}
+                onAddBlock={handleAddBlock}
+                onDeleteBlock={handleDeleteBlock}
+                defaultDate={shortcutData?.date}
+                defaultDoctorId={shortcutData?.doctorId}
+                defaultShift={shortcutData?.shift as any}
+                defaultStartTime={shortcutData?.startTime}
+                defaultEndTime={shortcutData?.endTime}
+              />
+            )}
+
+            {activeTab === 'doctors' && (
+              <DoctorManager
+                doctors={doctors}
+                onAddDoctor={handleAddDoctor}
+                onUpdateDoctor={handleUpdateDoctor}
+                onDeleteDoctor={handleDeleteDoctor}
+              />
+            )}
+
+          </div>
+        </main>
+      </div>
 
       <ConfirmModal
         isOpen={showResetConfirm}

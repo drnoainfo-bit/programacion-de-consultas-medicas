@@ -22,7 +22,6 @@ import DoctorManager from './components/DoctorManager';
 import BlockingsManager from './components/BlockingsManager';
 import AppointmentsManager from './components/AppointmentsManager';
 import ValidationPanel from './components/ValidationPanel';
-import SheetsPanel from './components/SheetsPanel';
 import MonthlyCalendar from './components/MonthlyCalendar';
 import MonthlyDoctorPlanner from './components/MonthlyDoctorPlanner';
 import ConfirmModal from './components/ConfirmModal';
@@ -60,7 +59,7 @@ export default function App() {
     localStorage.setItem('agenda_selectedPeriod', period);
   };
 
-  const [activeTab, setActiveTab] = useState<'calendar' | 'monthly' | 'appointments' | 'blockings' | 'doctors' | 'sheets'>('calendar');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'monthly' | 'appointments' | 'blockings' | 'doctors'>('calendar');
   const [weekFocusDate, setWeekFocusDate] = useState<string | undefined>(undefined);
   const [shortcutData, setShortcutData] = useState<{
     doctorId?: string;
@@ -489,16 +488,6 @@ export default function App() {
             <span>Medicos</span>
           </button>
 
-          <button
-            onClick={() => { setShortcutData(null); setActiveTab('sheets'); }}
-            className={`flex-1 min-w-[125px] py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'sheets' ? 'bg-emerald-700 text-white shadow-sm font-extrabold' : 'text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50'
-            }`}
-            id="tab-sheets"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>Sincronizar Sheet</span>
-          </button>
         </div>
 
         <div className="transition-all duration-200" id="tab-content-viewport">
@@ -592,16 +581,6 @@ export default function App() {
               onAddDoctor={handleAddDoctor}
               onUpdateDoctor={handleUpdateDoctor}
               onDeleteDoctor={handleDeleteDoctor}
-            />
-          )}
-
-          {activeTab === 'sheets' && (
-            <SheetsPanel
-              doctors={doctors}
-              appointments={appointments}
-              blockedDays={blockedDays}
-              shifts24h={shifts24h}
-              selectedPeriod={selectedPeriod}
             />
           )}
 

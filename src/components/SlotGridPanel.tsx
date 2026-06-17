@@ -111,10 +111,10 @@ function getSlotStatus(
     const ingEnd = startSlot + (app.newAdmissions || 0);
     const ctrEnd = ingEnd + (app.controls || 0);
     if (slotIdx >= startSlot && slotIdx < ingEnd) {
-      return { label: slotIdx === startSlot ? `${app.newAdmissions} ING` : '', bg: '#FFFF00', fg: '#1a1a1a', clickable: false };
+      return { label: 'INGRESO', bg: '#FFFF00', fg: '#1a1a1a', clickable: false };
     }
     if (slotIdx >= ingEnd && slotIdx < ctrEnd) {
-      return { label: slotIdx === ingEnd ? `${app.controls} CTR` : '', bg: '#FFFF00', fg: '#1a1a1a', clickable: false };
+      return { label: 'CONTROL', bg: '#FFFF00', fg: '#1a1a1a', clickable: false };
     }
   }
 

@@ -297,6 +297,8 @@ export async function exportDoctorsToExcel(
     '14:00 - 14:30', '14:30 - 15:00', '15:00 - 15:30',                   // 11-13
     '15:30 - 16:00', '16:00 - 16:30', '16:30 - 17:00',                   // 14-16
   ];
+  // Hora de inicio de cada slot (derivada de ALL_TIME_SLOTS)
+  const SLOT_STARTS = ALL_TIME_SLOTS.map(s => s.split(' - ')[0]);
 
   const DAY_LABELS = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES'];
 
@@ -390,16 +392,28 @@ export async function exportDoctorsToExcel(
       (b.shift === 'Todo el día' || b.shift === slotPeriod)
     );
     if (block) {
-      const bg = REASON_BG[block.reason] ?? C.NONE;
-      if (block.reason === 'reunion de servicio') {
-        return slotIdx === firstSlotOfPeriod + 1 ? { text: 'REU MED', bg, white: false } : null;
+      // Respetar startTime/endTime: solo colorear los slots dentro del rango horario
+      const slotTime = SLOT_STARTS[slotIdx];
+      const inRange = !block.startTime || !block.endTime
+        || (slotTime >= block.startTime && slotTime < block.endTime);
+      if (inRange) {
+        const bg = REASON_BG[block.reason] ?? C.NONE;
+        // Primer slot dentro del rango del bloqueo
+        const rawFirst = block.startTime
+          ? SLOT_STARTS.findIndex(t => t >= block.startTime!)
+          : -1;
+        const effectiveFirst = rawFirst >= 0 ? rawFirst : firstSlotOfPeriod;
+        if (block.reason === 'reunion de servicio') {
+          return slotIdx === effectiveFirst + 1 ? { text: 'REU MED', bg, white: false } : null;
+        }
+        const label = slotIdx === effectiveFirst
+          ? (block.reason === 'Otro'
+              ? (block.customReason || 'OTRO').toUpperCase()
+              : block.reason.toUpperCase())
+          : '';
+        return { text: label, bg, white: false };
       }
-      const label = slotIdx === firstSlotOfPeriod
-        ? (block.reason === 'Otro'
-            ? (block.customReason || 'OTRO').toUpperCase()
-            : block.reason.toUpperCase())
-        : '';
-      return { text: label, bg, white: false };
+      // Slot fuera del rango horario del bloqueo → puede tener consulta
     }
 
     // Consulta — solo consultas del mismo período que el slot
@@ -419,10 +433,14 @@ export async function exportDoctorsToExcel(
       const controlesEnd = ingresosEnd + (app.controls || 0);
 
       if (slotIdx >= startSlot && slotIdx < ingresosEnd) {
-        return { text: 'INGRESO', bg: C.POLICLINICO, white: false };
+        if (slotIdx > startSlot) return { text: '', bg: C.POLICLINICO, white: false };
+        const n = app.newAdmissions || 0;
+        return { text: n === 1 ? '1 INGRESO' : `${n} INGRESOS`, bg: C.POLICLINICO, white: false };
       }
       if (slotIdx >= ingresosEnd && slotIdx < controlesEnd) {
-        return { text: 'CONTROL', bg: C.POLICLINICO, white: false };
+        if (slotIdx > ingresosEnd) return { text: '', bg: C.POLICLINICO, white: false };
+        const n = app.controls || 0;
+        return { text: n === 1 ? '1 CONTROL' : `${n} CONTROLES`, bg: C.POLICLINICO, white: false };
       }
     }
 
@@ -523,11 +541,20 @@ export async function exportDoctorsToExcel(
     const docBlocks = blockedDays.filter(b => b.doctorId === doc.id);
     const docShifts = shifts24h.filter(s => s.doctorId === doc.id);
     const isTarde   = doc.defaultShift === 'Tarde';
-    const slotRange = doc.morningSala
-      ? { start: 0, end: 17 }          // día completo: mañana (sala) + tarde (consulta)
-      : isTarde
-        ? { start: 11, end: 17 }
-        : { start: 0, end: 11 };
+
+    // Calcular slotRange desde scheduleStart/scheduleEnd si están configurados
+    const scheduleToRange = (start?: string, end?: string, defStart = 0, defEnd = 11) => {
+      const ss = SLOT_STARTS; // defined above inside exportDoctorsToExcel
+      let s = defStart;
+      let e = defEnd;
+      if (start) { const i = ss.findIndex(t => t >= start); if (i >= 0) s = i; }
+      if (end)   { let last = -1; ss.forEach((t, i) => { if (t < end) last = i; }); if (last >= 0) e = last + 1; }
+      return { start: s, end: e };
+    };
+
+    const defStart = isTarde ? 11 : 0;
+    const defEnd   = doc.morningSala ? 17 : isTarde ? 17 : 11;
+    const slotRange = scheduleToRange(doc.scheduleStart, doc.scheduleEnd, defStart, defEnd);
     const slotsCount = slotRange.end - slotRange.start;
 
     const postTurnoDates = new Set<string>();

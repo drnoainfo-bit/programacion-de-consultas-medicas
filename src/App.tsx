@@ -65,11 +65,21 @@ export default function App() {
   const [shortcutData, setShortcutData] = useState<{
     doctorId?: string;
     date?: string;
-    shift?: 'MaÃ±ana' | 'Tarde' | 'Todo el dÃ­a';
+    shift?: 'Mañana' | 'Tarde' | 'Todo el día';
+    startTime?: string;
+    endTime?: string;
   } | null>(null);
 
   // Load all data from Supabase on mount
   useEffect(() => {
+    const salaOverrides: Record<string, boolean> = (() => {
+      try { return JSON.parse(localStorage.getItem('morningSala_overrides') || '{}'); }
+      catch { return {}; }
+    })();
+    const scheduleOverrides: Record<string, { start?: string; end?: string }> = (() => {
+      try { return JSON.parse(localStorage.getItem('schedule_overrides') || '{}'); }
+      catch { return {}; }
+    })();
     Promise.all([
       fetchDoctors(),
       fetchAppointments(),
@@ -77,7 +87,12 @@ export default function App() {
       fetchShifts24h(),
     ])
       .then(([docs, apps, blocks, shifts]) => {
-        setDoctors(docs);
+        setDoctors(docs.map(d => ({
+          ...d,
+          morningSala: salaOverrides[d.id] ?? d.morningSala ?? false,
+          scheduleStart: scheduleOverrides[d.id]?.start ?? d.scheduleStart,
+          scheduleEnd:   scheduleOverrides[d.id]?.end   ?? d.scheduleEnd,
+        })));
         setAppointments(apps);
         setBlockedDays(blocks);
         setShifts24h(shifts);
@@ -95,6 +110,20 @@ export default function App() {
   }, []);
 
   const handleUpdateDoctor = useCallback(async (id: string, updated: Partial<Doctor>) => {
+    if ('morningSala' in updated) {
+      try {
+        const overrides = JSON.parse(localStorage.getItem('morningSala_overrides') || '{}');
+        overrides[id] = !!updated.morningSala;
+        localStorage.setItem('morningSala_overrides', JSON.stringify(overrides));
+      } catch {}
+    }
+    if ('scheduleStart' in updated || 'scheduleEnd' in updated) {
+      try {
+        const overrides = JSON.parse(localStorage.getItem('schedule_overrides') || '{}');
+        overrides[id] = { ...(overrides[id] || {}), ...('scheduleStart' in updated ? { start: updated.scheduleStart } : {}), ...('scheduleEnd' in updated ? { end: updated.scheduleEnd } : {}) };
+        localStorage.setItem('schedule_overrides', JSON.stringify(overrides));
+      } catch {}
+    }
     setDoctors(prev => {
       const next = prev.map(d => (d.id === id ? { ...d, ...updated } : d));
       const doc = next.find(d => d.id === id);
@@ -187,6 +216,12 @@ export default function App() {
 
   const handleCalendarAddBlock = (docId: string, date: string, shift: any) => {
     setShortcutData({ doctorId: docId, date, shift });
+    setActiveTab('blockings');
+  };
+
+  const handleAddSlotBlock = (docId: string, date: string, startTime: string, endTime: string) => {
+    const shift: 'Mañana' | 'Tarde' = startTime >= '14:00' ? 'Tarde' : 'Mañana';
+    setShortcutData({ doctorId: docId, date, shift, startTime, endTime });
     setActiveTab('blockings');
   };
 
@@ -333,7 +368,7 @@ export default function App() {
               <button
                 onClick={handleDownloadExcel}
                 className="flex items-center gap-1.5 px-3.5 py-2 font-semibold text-xs text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer shadow-sm transition-all border border-emerald-500/20 active:scale-95"
-                title="Generar planilla Excel con pestaÃ±as divididas por mÃ©dico"
+                title="Generar planilla Excel con pestañas divididas por médico"
                 id="btn-download-master-excel"
               >
                 <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
@@ -505,6 +540,7 @@ export default function App() {
                 onToggleShift24h={handleToggleShift24h}
                 onAddAppointmentClick={handleCalendarAddAppointment}
                 onAddBlockClick={handleCalendarAddBlock}
+                onAddSlotBlock={handleAddSlotBlock}
               />
             </div>
           )}
@@ -545,6 +581,8 @@ export default function App() {
               defaultDate={shortcutData?.date}
               defaultDoctorId={shortcutData?.doctorId}
               defaultShift={shortcutData?.shift as any}
+              defaultStartTime={shortcutData?.startTime}
+              defaultEndTime={shortcutData?.endTime}
             />
           )}
 
@@ -573,10 +611,10 @@ export default function App() {
           <div className="space-y-1">
             <h4 className="font-semibold text-emerald-900 text-sm flex items-center gap-2">
               <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-              SincronizaciÃ³n a Planilla (Plataforma de Hojas de CÃ¡lculo)
+              Sincronización a Planilla (Plataforma de Hojas de Cálculo)
             </h4>
             <p className="text-xs text-emerald-800">
-              La plataforma le permite exportar los datos ingresados en un archivo de Excel (.xlsx) estructurado con <strong>una hoja independiente para cada mÃ©dico</strong>.
+              La plataforma le permite exportar los datos ingresados en un archivo de Excel (.xlsx) estructurado con <strong>una hoja independiente para cada médico</strong>.
             </p>
           </div>
           <button
@@ -598,8 +636,8 @@ export default function App() {
         isOpen={showResetConfirm}
         onClose={() => setShowResetConfirm(false)}
         onConfirm={executeResetToFactory}
-        title="Restaurar datos de fÃ¡brica"
-        message="Â¿EstÃ¡ seguro de que desea restaurar los datos iniciales de la rotativa mÃ©dica? Esto eliminarÃ¡ todos sus cambios recientes y cargarÃ¡ los profesionales y agendas de demostraciÃ³n de ejemplo."
+        title="Restaurar datos de fábrica"
+        message="¿Está seguro de que desea restaurar los datos iniciales de la rotativa médica? Esto eliminará todos sus cambios recientes y cargará los profesionales y agendas de demostración de ejemplo."
         confirmText="Restaurar Ejemplos"
         cancelText="Volver"
         type="warning"

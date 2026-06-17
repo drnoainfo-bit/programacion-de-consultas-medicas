@@ -17,6 +17,8 @@ interface BlockingsManagerProps {
   defaultDate?: string;
   defaultDoctorId?: string;
   defaultShift?: 'Mañana' | 'Tarde' | 'Todo el día';
+  defaultStartTime?: string;
+  defaultEndTime?: string;
 }
 
 export default function BlockingsManager({
@@ -27,6 +29,8 @@ export default function BlockingsManager({
   defaultDate = '',
   defaultDoctorId = '',
   defaultShift = 'Todo el día',
+  defaultStartTime,
+  defaultEndTime,
 }: BlockingsManagerProps) {
   const [showForm, setShowForm] = useState(defaultDate !== '' || defaultDoctorId !== '');
   const [blockToDelete, setBlockToDelete] = useState<string | null>(null);
@@ -36,8 +40,8 @@ export default function BlockingsManager({
   const [reason, setReason] = useState<BlockReason>('UPC');
   const [customReason, setCustomReason] = useState('');
   const [notes, setNotes] = useState('');
-  const [startTime, setStartTime] = useState('08:00');
-  const [endTime, setEndTime] = useState('17:00');
+  const [startTime, setStartTime] = useState(defaultStartTime || '08:00');
+  const [endTime, setEndTime] = useState(defaultEndTime || '17:00');
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -66,7 +70,9 @@ export default function BlockingsManager({
       setShowForm(true);
     }
     if (defaultShift) setShift(defaultShift);
-  }, [defaultDoctorId, defaultDate, defaultShift]);
+    if (defaultStartTime) setStartTime(defaultStartTime);
+    if (defaultEndTime) setEndTime(defaultEndTime);
+  }, [defaultDoctorId, defaultDate, defaultShift, defaultStartTime, defaultEndTime]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

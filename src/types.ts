@@ -15,6 +15,8 @@ export interface Doctor {
   sheetName: string;   // Sheet corresponding key (e.g., 'NOA', 'SALAZAR', etc.)
   maxWeeklyPatients?: number; // Quota tracker
   morningSala?: boolean; // Doctors who do sala in the mornings (e.g. Bimtrup, Muñoz)
+  scheduleStart?: string; // HH:MM — inicio de jornada en el Excel (default según turno)
+  scheduleEnd?: string;   // HH:MM — término de jornada en el Excel (default según turno)
 }
 
 export type BlockReason =

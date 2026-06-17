@@ -1,19 +1,180 @@
 ﻿import React, { useState, useMemo } from 'react';
 import { Doctor, Appointment, BlockedDay, Shift24h } from '../types';
 import ConfirmModal from './ConfirmModal';
-import { 
-  FileSpreadsheet, 
-  HelpCircle, 
-  Key, 
-  RefreshCw, 
-  Send, 
-  ShieldCheck, 
+import {
+  FileSpreadsheet,
+  HelpCircle,
+  RefreshCw,
+  Send,
   AlertCircle,
   Eye,
   CheckCircle,
-  LogOut,
-  Sparkles
+  Zap,
 } from 'lucide-react';
+
+const N8N_WEBHOOK_URL = 'https://n8n-n8n.tj2360.easypanel.host/webhook/sync-rotativa';
+
+// ── Slot-grid sync helpers ─────────────────────────────────────────────────
+
+const SLOT_STARTS_ALL = [
+  '08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30',
+  '12:00','12:30','13:00',
+  '14:00','14:30','15:00','15:30','16:00','16:30',
+];
+
+// Week index (0-4) → 1-based start column: B=2, I=9, P=16
+const WEEK_COL_START = [2, 9, 16, 2, 9];
+
+function colLetter(n: number): string {
+  if (n <= 26) return String.fromCharCode(64 + n);
+  return String.fromCharCode(64 + Math.floor((n - 1) / 26)) +
+         String.fromCharCode(64 + ((n - 1) % 26 + 1));
+}
+
+function buildSlotGridUpdates(
+  doctors: Doctor[],
+  appointments: Appointment[],
+  blockedDays: BlockedDay[],
+  shifts24h: Shift24h[],
+  year: number,
+  month: number,
+): { range: string; values: string[][] }[] {
+  // Monday of the week that contains the 1st of the month
+  const firstDay = new Date(year, month - 1, 1);
+  const dow0 = firstDay.getDay();
+  const daysBack = dow0 === 0 ? 6 : dow0 - 1;
+  const firstMonday = new Date(firstDay);
+  firstMonday.setDate(firstDay.getDate() - daysBack);
+
+  const totalDays = new Date(year, month, 0).getDate();
+  const updates: { range: string; values: string[][] }[] = [];
+
+  // Post-turno sets per doctor
+  const postTurno: Record<string, Set<string>> = {};
+  doctors.forEach(d => {
+    const set = new Set<string>();
+    shifts24h.filter(s => s.doctorId === d.id).forEach(s => {
+      const dt = new Date(`${s.date}T12:00:00`);
+      dt.setDate(dt.getDate() + 1);
+      set.add(dt.toISOString().slice(0, 10));
+    });
+    postTurno[d.id] = set;
+  });
+
+  doctors.forEach(doc => {
+    const isTarde = doc.defaultShift === 'Tarde';
+    const slotCount = isTarde ? 17 : 11;
+    const docApps   = appointments.filter(a => a.doctorId === doc.id);
+    const docBlocks = blockedDays.filter(b => b.doctorId === doc.id);
+    const docGuards = shifts24h.filter(s => s.doctorId === doc.id);
+    const ptSet = postTurno[doc.id];
+
+    for (let day = 1; day <= totalDays; day++) {
+      const mm = String(month).padStart(2, '0');
+      const dd = String(day).padStart(2, '0');
+      const dateStr = `${year}-${mm}-${dd}`;
+      const date = new Date(`${dateStr}T12:00:00`);
+      const dow = date.getDay();
+      if (dow === 0 || dow === 6) continue; // skip weekends
+
+      const mondayDow = dow - 1; // 0=Mon, 4=Fri
+      const diffDays = Math.round((date.getTime() - firstMonday.getTime()) / 86400000);
+      const weekIdx = Math.floor(diffDays / 7);
+      if (weekIdx < 0 || weekIdx > 4) continue;
+
+      const colNum  = WEEK_COL_START[weekIdx] + mondayDow;
+      const colStr  = colLetter(colNum);
+      const isBlock2 = weekIdx >= 3;
+      // Row where slot 0 lives in this block
+      const rowStart = !isBlock2 ? 4 : (isTarde ? 24 : 18);
+
+      // ── Compute slot contents ──
+      const slots: string[] = new Array(slotCount).fill('');
+      const isGuard = docGuards.some(s => s.date === dateStr);
+      const isPT    = ptSet.has(dateStr);
+
+      if (isGuard) {
+        slots[0] = 'TURNO 24h';
+      } else if (!isPT) {
+        // Morning block (shift = 'Mañana' | 'Todo el día')
+        const mBlock = docBlocks.find(b =>
+          b.date === dateStr && (b.shift === 'Mañana' || b.shift === 'Todo el día')
+        );
+        if (mBlock) {
+          const rawFirst = mBlock.startTime
+            ? SLOT_STARTS_ALL.findIndex(t => t >= mBlock.startTime!)
+            : -1;
+          const firstSi = rawFirst >= 0 && rawFirst <= 10 ? rawFirst : 0;
+          const label = mBlock.reason === 'Otro'
+            ? (mBlock.customReason || 'OTRO').toUpperCase()
+            : mBlock.reason.toUpperCase();
+          for (let si = 0; si <= 10; si++) {
+            const t = SLOT_STARTS_ALL[si];
+            const inRange = !mBlock.startTime || !mBlock.endTime ||
+              (t >= mBlock.startTime && t < mBlock.endTime);
+            if (inRange && si === firstSi) slots[si] = label;
+          }
+        } else {
+          // Morning appointment
+          const mApp = docApps.find(a =>
+            a.date === dateStr && a.shift !== 'Tarde' && (a as any).status !== 'Cancelada'
+          );
+          if (mApp) {
+            const startSi = mApp.include800 ? 0 : mApp.include830 ? 1 : 2;
+            const ingEnd  = startSi + (mApp.newAdmissions || 0);
+            const ctlEnd  = ingEnd  + (mApp.controls || 0);
+            for (let si = 0; si <= 10; si++) {
+              if (si >= startSi && si < ingEnd) slots[si] = 'INGRESO';
+              else if (si >= ingEnd && si < ctlEnd) slots[si] = 'CONTROL';
+            }
+          }
+        }
+
+        // Tarde slots (only for tarde doctors, indices 11-16)
+        if (isTarde) {
+          const tBlock = docBlocks.find(b =>
+            b.date === dateStr && (b.shift === 'Tarde' || b.shift === 'Todo el día')
+          );
+          // 'Todo el día' block already wrote morning label; tarde gets its own label only if shift='Tarde'
+          const explicitTBlock = docBlocks.find(b =>
+            b.date === dateStr && b.shift === 'Tarde'
+          );
+          if (explicitTBlock || (tBlock && tBlock.shift === 'Todo el día')) {
+            const b = explicitTBlock || tBlock!;
+            const label = b.reason === 'Otro'
+              ? (b.customReason || 'OTRO').toUpperCase()
+              : b.reason.toUpperCase();
+            slots[11] = label; // first tarde slot
+          } else {
+            const tApp = docApps.find(a =>
+              a.date === dateStr && a.shift === 'Tarde' && (a as any).status !== 'Cancelada'
+            );
+            if (tApp) {
+              const startSi = 11;
+              const ingEnd  = startSi + (tApp.newAdmissions || 0);
+              const ctlEnd  = ingEnd  + (tApp.controls || 0);
+              for (let si = 11; si < slotCount; si++) {
+                if (si >= startSi && si < ingEnd) slots[si] = 'INGRESO';
+                else if (si >= ingEnd && si < ctlEnd) slots[si] = 'CONTROL';
+              }
+            }
+          }
+        }
+      }
+
+      // Push one column-range update per date×doctor
+      const endRow = rowStart + slotCount - 1;
+      updates.push({
+        range: `${doc.sheetName}!${colStr}${rowStart}:${colStr}${endRow}`,
+        values: slots.map(v => [v]),
+      });
+    }
+  });
+
+  return updates;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 
 interface SheetsPanelProps {
   doctors: Doctor[];
@@ -31,12 +192,10 @@ export default function SheetsPanel({
   selectedPeriod,
 }: SheetsPanelProps) {
   const [spreadsheetUrl, setSpreadsheetUrl] = useState('');
-  const [manualToken, setManualToken] = useState('');
   const [showSheetConfirm, setShowSheetConfirm] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportResult, setExportResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [startRow, setStartRow] = useState<number>(8); // Row where schedule starts writing (defaults to 8)
-  const [showPreviewIdx, setShowPreviewIdx] = useState<number>(0); // Index of doctor to preview
+  const [showPreviewIdx, setShowPreviewIdx] = useState<number>(0);
 
   // Dynamic Google Sheet ID extractor
   const spreadsheetId = useMemo(() => {
@@ -145,7 +304,7 @@ export default function SheetsPanel({
         if (fullBlock) {
           observCell = `Bloque Completo: ${fullBlock.reason} - ${fullBlock.notes || ''}`;
         } else if (hasGuard) {
-          observCell = 'Turno ClÃ­nico de Urgencia 24 Horas';
+          observCell = 'Turno Clínico de Urgencia 24 Horas';
         } else if (morningApp?.notes && afternoonApp?.notes) {
           observCell = `AM: ${morningApp.notes}${morningStartInfo} | PM: ${afternoonApp.notes}`;
         } else if (morningApp?.notes) {
@@ -153,9 +312,9 @@ export default function SheetsPanel({
         } else if (afternoonApp?.notes) {
           observCell = `PM: ${afternoonApp.notes}${morningStartInfo ? ` | ${morningStartInfo}` : ''}`;
         } else if (morningStartInfo) {
-          observCell = `AtenciÃ³n regular${morningStartInfo}`;
+          observCell = `Atención regular${morningStartInfo}`;
         } else {
-          observCell = 'AtenciÃ³n programada regular';
+          observCell = 'Atención programada regular';
         }
 
         // Row of values
@@ -184,66 +343,39 @@ export default function SheetsPanel({
       });
       return;
     }
-
-    const token = manualToken.trim();
-    if (!token) {
-      setExportResult({
-        success: false,
-        message: 'Por favor ingrese un Access Token de Google para autorizar la escritura segura en la casilla (2).'
-      });
-      return;
-    }
-
     setShowSheetConfirm(true);
   };
 
   const executeGoogleSheetsWrite = async () => {
-    const token = manualToken.trim();
     setIsExporting(true);
     setExportResult(null);
 
     try {
-      // Package values for batch API request
-      const dataPayloads = Object.keys(sheetsPayload).map((sheetName) => {
-        const rows = sheetsPayload[sheetName];
-        // Calculate dynamic range based on start row
-        const endRow = startRow + rows.length - 1;
-        
-        return {
-          range: `${sheetName}!B${startRow}:H${endRow}`, // Writing into columns B to H
-          values: rows,
-        };
-      });
+      const { year, month } = periodInfo;
+      const updates = buildSlotGridUpdates(doctors, appointments, blockedDays, shifts24h, year, month);
 
-      const endpoint = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`;
+      if (updates.length === 0) {
+        throw new Error('No hay datos de rotativa para el período seleccionado.');
+      }
 
-      const response = await fetch(endpoint, {
+      const response = await fetch(N8N_WEBHOOK_URL, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          valueInputOption: 'USER_ENTERED',
-          data: dataPayloads
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spreadsheetId, updates }),
       });
 
       const resJson = await response.json();
 
-      if (!response.ok) {
-        throw new Error(resJson.error?.message || `Error HTTP: ${response.status}`);
+      if (!response.ok || !resJson.success) {
+        throw new Error(resJson.message || `Error HTTP: ${response.status}`);
       }
 
-      setExportResult({
-        success: true,
-        message: `Â¡Guardado Exitoso! Se actualizaron correctamente las pestaÃ±as de planificaciÃ³n para todos los mÃ©dicos (NOA, SALAZAR, CARDENAS, ORTEGA, BRINTRUP, MUÃ‘OZ) desde la celda de inicio B${startRow}.`
-      });
+      setExportResult({ success: true, message: `✓ ${resJson.message}` });
     } catch (error: any) {
-      console.error('Sheets API Error:', error);
+      console.error('Sheets sync error:', error);
       setExportResult({
         success: false,
-        message: `Fallo de Escritura: ${error.message || 'Error de red o permisos insuficientes. Verifique que el token sea vigente y que el Google Sheet haya sido compartido.'}`
+        message: error.message || 'Error de conexión con n8n. Verifique que el workflow esté activo.',
       });
     } finally {
       setIsExporting(false);
@@ -263,14 +395,14 @@ export default function SheetsPanel({
           </div>
           <div>
             <h2 className="text-sm font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wide">
-              Exportador Directo a Google Sheets (Preserva Formato)
+              Sincronización Directa con Google Sheets
             </h2>
-            <p className="text-[11px] text-slate-500 font-medium">Actualice de forma directa celdas y filas en las pestaÃ±as originales de sus mÃ©dicos</p>
+            <p className="text-[11px] text-slate-500 font-medium">Escribe la rotativa directo en las pestañas de sus médicos — sin tokens, sin copiar nada</p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 bg-emerald-100/65 px-3 py-1 rounded-full border border-emerald-250 select-none">
-          <span className="w-2 h-2 rounded-full bg-emerald-550 animate-pulse text-emerald-700" />
-          <span className="text-[10px] font-black text-emerald-850 uppercase tracking-wider">IntegraciÃ³n Oficial Activa (Google API)</span>
+        <div className="flex items-center gap-1.5 bg-emerald-100/65 px-3 py-1 rounded-full border border-emerald-200 select-none">
+          <Zap className="w-3 h-3 text-emerald-600" />
+          <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider">Vía n8n · OAuth automático</span>
         </div>
       </div>
 
@@ -282,64 +414,19 @@ export default function SheetsPanel({
           
           {/* Spreadsheet ID / link */}
           <div className="space-y-1">
-            <label className="block text-xs font-bold text-slate-700">1. URL / ID de la Planilla Google Sheet</label>
+            <label className="block text-xs font-bold text-slate-700">1. URL de la Planilla Google Sheet</label>
             <input
               type="text"
-              placeholder="Pegue la URL del archivo de Google Sheet (ej: https://docs.google.com/spreadsheets/d/...)"
+              placeholder="https://docs.google.com/spreadsheets/d/..."
               value={spreadsheetUrl}
               onChange={(e) => setSpreadsheetUrl(e.target.value)}
               className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-sans text-slate-700 bg-white"
             />
             {spreadsheetId && (
-              <span className="text-[9.5px] font-mono font-bold text-emerald-800 block">
-                âœ“ ID Identificado: <span className="underline">{spreadsheetId}</span>
+              <span className="text-[9.5px] font-mono font-bold text-emerald-700 block">
+                ✓ ID: <span className="underline">{spreadsheetId}</span>
               </span>
             )}
-          </div>
-
-          {/* Access Token Input */}
-          <div className="space-y-1.5 relative">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                <Key className="w-3.5 h-3.5 text-slate-400" />
-                <span>2. Access Token de Seguridad (Google OAuth)</span>
-              </label>
-              <a
-                href="https://developers.google.com/oauthplayground/"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[9.5px] text-emerald-600 font-black hover:underline tracking-wide bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100"
-                title="Consiga un token rÃ¡pido en el playground seguro"
-              >
-                Como Obtener Token
-              </a>
-            </div>
-            
-            <textarea
-              placeholder="Pegue su Access Token temporal con permisos de sheets... (Ej: ya29.a0Ax...)"
-              value={manualToken}
-              onChange={(e) => setManualToken(e.target.value)}
-              className="w-full h-15 px-3 py-2 text-[11px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-mono text-slate-700 bg-white leading-relaxed resize-none"
-            />
-          </div>
-
-          {/* Row config starting coordinates */}
-          <div className="grid grid-cols-2 gap-3 pb-1 border-b border-slate-150">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Fila Inicio de Datos</label>
-              <input
-                type="number"
-                min="1"
-                value={startRow}
-                onChange={(e) => setStartRow(Number(e.target.value))}
-                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-800 font-mono font-bold"
-              />
-            </div>
-            <div className="flex flex-col justify-end">
-              <span className="text-[10px] text-slate-400 font-medium leading-tight">
-                Recomendado: <strong>Fila 8</strong> de sus pestaÃ±as (NOA, SALAZAR, etc.) para encajar en el formato de diseÃ±o.
-              </span>
-            </div>
           </div>
 
           {/* Export Actions button */}
@@ -371,12 +458,12 @@ export default function SheetsPanel({
           <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2 text-[11px] text-slate-600">
             <h4 className="font-extrabold text-slate-700 flex items-center gap-1">
               <HelpCircle className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Instrucciones CrÃ­ticas de Seguridad</span>
+              <span>Requisitos del Google Sheet</span>
             </h4>
             <ul className="list-disc list-inside space-y-1 text-slate-500 font-medium">
-              <li>AsegÃºrese de compartir el Google Sheet con permiso de <strong>Editor</strong>.</li>
-              <li>Las hojas mÃ©dicas deben llamarse exactamente: <strong className="text-slate-800">NOA, SALAZAR, CARDENAS, ORTEGA, BRINTRUP, MUÃ‘OZ</strong>.</li>
-              <li>Los colores, grÃ¡ficos y fÃ³rmulas del Sheet se conservarÃ¡n intactos.</li>
+              <li>Compartir el Sheet con la cuenta Google vinculada a n8n como <strong>Editor</strong>.</li>
+              <li>Las pestañas deben llamarse exactamente: <strong className="text-slate-800">NOA, SALAZAR, CARDENAS, ORTEGA, BRINTRUP, MUÑOZ</strong>.</li>
+              <li>Colores, gráficos y fórmulas del Sheet se conservarán intactos.</li>
             </ul>
           </div>
 
@@ -411,7 +498,7 @@ export default function SheetsPanel({
           <div className="flex-grow bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-[10.5px] text-slate-300 overflow-x-auto max-h-[360px] overflow-y-auto">
             <div className="border-b border-slate-800 pb-2 mb-2 flex items-center justify-between text-[11px]">
               <span className="text-emerald-400 font-bold">Datos a escribir en Pestana: "{previewDoctor?.sheetName || 'N/A'}"</span>
-              <span className="text-slate-500 font-bold">Rango Estimado: B{startRow} : H{startRow + previewRows.length - 1}</span>
+              <span className="text-slate-500 font-bold">Formato slot-grid · plantilla Excel</span>
             </div>
 
             <table className="w-full text-left font-mono">
@@ -432,7 +519,7 @@ export default function SheetsPanel({
                   </tr>
                 ) : (
                   previewRows.map((row, idx) => {
-                    const rowNum = startRow + idx;
+                    const rowNum = 4 + idx;
                     const dateVal = row[0];
                     const morningText = row[1] || row[2] ? `${row[1] || '-'}/${row[2] || '-'}` : '';
                     const afternoonText = row[3] || row[4] ? `${row[3] || '-'}/${row[4] || '-'}` : '';
@@ -491,7 +578,7 @@ export default function SheetsPanel({
             )}
             <div>
               <h5 className="font-extrabold uppercase tracking-wider text-[11px]">
-                {exportResult.success ? 'SincronizaciÃ³n Completada' : 'AtenciÃ³n Requerida'}
+                {exportResult.success ? 'Sincronización Completada' : 'Atención Requerida'}
               </h5>
               <p className="mt-1 font-semibold leading-relaxed">{exportResult.message}</p>
             </div>
@@ -504,7 +591,7 @@ export default function SheetsPanel({
         onClose={() => setShowSheetConfirm(false)}
         onConfirm={executeGoogleSheetsWrite}
         title="Escribir en Google Sheet"
-        message="La aplicaciÃ³n escribirÃ¡ la rotativa mÃ©dica automatizada directamente en el Google Sheet original, preservando todo el diseÃ±o, colores, fuentes y fÃ³rmulas existentes. Â¿Desea continuar con la sincronizaciÃ³n?"
+        message="La aplicación escribirá la rotativa médica automatizada directamente en el Google Sheet original, preservando todo el diseño, colores, fuentes y fórmulas existentes. ¿Desea continuar con la sincronización?"
         confirmText="Sincronizar Sheet"
         cancelText="Volver"
         type="success"

@@ -6,19 +6,22 @@
 import React, { useEffect, useState } from 'react';
 import { Doctor, Appointment, BlockedDay, Shift24h } from '../types';
 import { getWeekDates, formatDateString, formatReadableDate, getBlockingForSlot } from '../utils';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Calendar, 
-  AlertTriangle, 
-  CheckCircle, 
-  Clock, 
-  User, 
-  PlusCircle, 
+import {
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  User,
+  PlusCircle,
   ExternalLink,
   Printer,
-  Activity
+  Activity,
+  LayoutGrid,
+  List
 } from 'lucide-react';
+import SlotGridPanel from './SlotGridPanel';
 
 interface WeeklyCalendarProps {
   doctors: Doctor[];
@@ -26,9 +29,11 @@ interface WeeklyCalendarProps {
   blockedDays: BlockedDay[];
   shifts24h: Shift24h[];
   selectedPeriod: string;
+  focusDate?: string;
   onAddAppointmentClick: (docId: string, date: string, shift: any) => void;
   onAddBlockClick: (docId: string, date: string, shift: any) => void;
   onToggleShift24h: (docId: string, date: string) => void;
+  onAddSlotBlock: (docId: string, date: string, startTime: string, endTime: string) => void;
 }
 
 export default function WeeklyCalendar({
@@ -37,10 +42,14 @@ export default function WeeklyCalendar({
   blockedDays,
   shifts24h,
   selectedPeriod,
+  focusDate,
   onAddAppointmentClick,
   onAddBlockClick,
   onToggleShift24h,
+  onAddSlotBlock,
 }: WeeklyCalendarProps) {
+  const [viewMode, setViewMode] = useState<'summary' | 'slots'>('summary');
+  const [gridDocId, setGridDocId] = useState<string>('');
   const getPeriodStartDate = (period: string) => {
     const [yearRaw, monthRaw] = period.split('-').map(Number);
     const now = new Date();
@@ -54,6 +63,14 @@ export default function WeeklyCalendar({
   useEffect(() => {
     setCurrentWeekRef(getPeriodStartDate(selectedPeriod));
   }, [selectedPeriod]);
+
+  // Navega a la semana de la fecha accionada desde el panel mensual
+  useEffect(() => {
+    if (!focusDate) return;
+    const [y, m, d] = focusDate.split('-').map(Number);
+    setCurrentWeekRef(new Date(y, m - 1, d, 12, 0, 0));
+    document.getElementById('calendar-root')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [focusDate]);
 
   const weekdays = getWeekDates(currentWeekRef);
 
@@ -75,6 +92,11 @@ export default function WeeklyCalendar({
 
   const activeDoctors = doctors.filter(d => d.isActive);
 
+  // Inicializar gridDocId con el primer médico activo
+  React.useEffect(() => {
+    if (!gridDocId && activeDoctors.length > 0) setGridDocId(activeDoctors[0].id);
+  }, [activeDoctors.length]);
+
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200" id="calendar-root">
       {/* Calendar Header with controls */}
@@ -94,6 +116,26 @@ export default function WeeklyCalendar({
         </div>
 
         <div className="flex items-center gap-2" id="calendar-controls">
+          {/* Toggle vista */}
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden shadow-sm">
+            <button
+              onClick={() => setViewMode('summary')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-colors ${viewMode === 'summary' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+              title="Vista resumen por médico"
+            >
+              <List className="w-3.5 h-3.5" />
+              Resumen
+            </button>
+            <button
+              onClick={() => setViewMode('slots')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-colors border-l border-slate-200 ${viewMode === 'slots' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+              title="Vista grilla por slots de 30 minutos"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              Vista Slots
+            </button>
+          </div>
+
           <button
             onClick={() => window.print()}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors shadow-sm cursor-pointer print:hidden"
@@ -158,8 +200,22 @@ export default function WeeklyCalendar({
         <span>Al {formatReadableDate(formatDateString(weekdays[6]))}</span>
       </div>
 
-      {/* Responsive scrollable week grid — sticky headers */}
-      <div className="overflow-auto max-h-[calc(100vh-340px)] min-h-[300px]" id="week-grid-container">
+      {/* Vista Slots */}
+      {viewMode === 'slots' && (
+        <SlotGridPanel
+          doctors={activeDoctors}
+          appointments={appointments as (import('../types').Appointment & { status?: string })[]}
+          blockedDays={blockedDays}
+          shifts24h={shifts24h}
+          weekdays={weekdays}
+          selectedDocId={gridDocId}
+          onSelectDoc={setGridDocId}
+          onAddSlotBlock={onAddSlotBlock}
+        />
+      )}
+
+      {/* Vista Resumen — Responsive scrollable week grid — sticky headers */}
+      <div className={`overflow-auto max-h-[calc(100vh-340px)] min-h-[300px] ${viewMode !== 'summary' ? 'hidden' : ''}`} id="week-grid-container">
         <div className="min-w-[1050px] divide-y divide-slate-250">
           {/* Day Headers */}
           <div className="grid grid-cols-7 bg-slate-50 text-center text-xs font-semibold text-slate-600 select-none sticky top-0 z-20 border-b border-slate-200 shadow-sm">

@@ -5,6 +5,12 @@
 
 import React, { useState } from 'react';
 import { Doctor, Shift } from '../types';
+
+const TIME_OPTIONS = [
+  '08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30',
+  '12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30',
+  '16:00','16:30','17:00',
+];
 import ConfirmModal from './ConfirmModal';
 import { UserPlus, Trash2, Edit2, ShieldAlert, CheckCircle2, User, HelpCircle } from 'lucide-react';
 
@@ -265,6 +271,26 @@ export default function DoctorManager({
                   >
                     {doc.morningSala ? 'Sí' : 'No'}
                   </button>
+                </div>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="shrink-0">Horario Excel:</span>
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={doc.scheduleStart ?? (doc.defaultShift === 'Tarde' ? '14:00' : '08:00')}
+                      onChange={e => onUpdateDoctor(doc.id, { scheduleStart: e.target.value })}
+                      className="text-[10px] font-mono font-bold border border-slate-200 rounded px-1 py-0.5 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    >
+                      {TIME_OPTIONS.slice(0, -1).map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <span className="text-slate-300 text-[10px]">–</span>
+                    <select
+                      value={doc.scheduleEnd ?? (doc.defaultShift === 'Tarde' ? '17:00' : doc.morningSala ? '17:00' : '13:30')}
+                      onChange={e => onUpdateDoctor(doc.id, { scheduleEnd: e.target.value })}
+                      className="text-[10px] font-mono font-bold border border-slate-200 rounded px-1 py-0.5 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    >
+                      {TIME_OPTIONS.slice(1).map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
                 </div>
               </div>
 
